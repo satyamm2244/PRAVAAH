@@ -224,6 +224,27 @@ def normalize_ward(ward_id: str):
 
     return ward_id
 
+# =============================================================================
+# ALERT HISTORY
+# =============================================================================
+
+@app.get("/api/alerts/history/all")
+def get_alert_history(
+    db: Session = Depends(get_db),
+    current_officer=Depends(require_officer),
+):
+    alerts = (
+        db.query(Alert)
+        .order_by(
+            Alert.created_at.desc()
+        )
+        .all()
+    )
+
+    return [
+        alert_to_dict(alert)
+        for alert in alerts
+    ]
 
 # =============================================================================
 # SERIALIZERS
