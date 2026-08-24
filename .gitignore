@@ -1,0 +1,40 @@
+# Environment variables
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+
+backend/venv/
+backend/.venv/
+
+# Database
+backend/pravaah.db
+*.db
+*.sqlite
+*.sqlite3
+
+# Uploaded evidence
+backend/uploads/
+
+# Next.js
+Frontend/node_modules/
+Frontend/.next/
+Frontend/out/
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
+
+# IDE / Operating System
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+# Archives
+*.zip
