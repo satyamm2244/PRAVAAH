@@ -25,6 +25,7 @@ import {
 
 import Header from "@/components/dashboard/Header";
 import Sidebar from "@/components/dashboard/Sidebar";
+import WardDetailModal from "@/components/dashboard/WardDetailModal";
 
 import {
   getStoredUser,
@@ -41,6 +42,15 @@ import type {
   WardReading,
 } from "@/lib/mock-engine";
 
+import {
+  calculateWardPropagation,
+  type WardPropagationResult,
+} from "@/lib/propagation-engine";
+
+import type {
+  WardCoordinate,
+} from "@/lib/ward-connectivity";
+
 
 /* ========================================================================= */
 /* TYPES                                                                     */
@@ -48,40 +58,29 @@ import type {
 
 type BackendWard = {
   ward: string;
-
   rainfallMm: number;
-
   riverLevelCm: number;
-
   reportCount: number;
 
   verifiedReportCount?: number;
-
   pendingReportCount?: number;
-
   rejectedReportCount?: number;
-
   totalReportCount?: number;
 
   latitude: number;
-
   longitude: number;
 
   dataMode?: string;
-
   timestamp?: number;
 
   sources?: {
     rainfall?: string;
-
     rainfallMode?: string;
 
     riverLevel?: string;
-
     riverLevelMode?: string;
 
     crowdReports?: string;
-
     crowdReportsMode?: string;
   };
 };
@@ -89,16 +88,12 @@ type BackendWard = {
 
 type SystemStatusResponse = {
   status: string;
-
   dataMode: string;
 
   reports?: {
     total?: number;
-
     pending?: number;
-
     verified?: number;
-
     rejected?: number;
   };
 
@@ -115,8 +110,7 @@ type OverviewCardProps = {
 
   subtitle: string;
 
-  icon:
-    LucideIcon;
+  icon: LucideIcon;
 
   tone:
     | "blue"
@@ -133,7 +127,6 @@ type OverviewCardProps = {
 const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_URL ||
   "http://127.0.0.1:8000";
-
 
 const REFRESH_INTERVAL =
   4000;
@@ -205,6 +198,28 @@ export default function Home() {
   ] =
     useState<Date | null>(
       null
+    );
+
+
+  /* ========================================================================= */
+  /* WARD DETAIL MODAL                                                         */
+  /* ========================================================================= */
+
+  const [
+    selectedWard,
+    setSelectedWard,
+  ] =
+    useState<WardRisk | null>(
+      null
+    );
+
+
+  const [
+    modalOpen,
+    setModalOpen,
+  ] =
+    useState(
+      false
     );
 
 
@@ -311,6 +326,39 @@ export default function Home() {
 
           setWardRisks(
             evaluated
+          );
+
+
+          /*
+           * Keep an already selected ward synchronized
+           * with the latest 4-second refresh.
+           */
+          setSelectedWard(
+            (
+              current
+            ) => {
+
+              if (
+                !current
+              ) {
+
+                return null;
+
+              }
+
+
+              return (
+                evaluated.find(
+                  (
+                    ward
+                  ) =>
+                    ward.ward ===
+                    current.ward
+                ) ??
+                null
+              );
+
+            }
           );
 
 
@@ -594,6 +642,108 @@ export default function Home() {
 
 
   /* ========================================================================= */
+  /* WARD COORDINATES                                                         */
+  /* ========================================================================= */
+
+  const coordinates =
+    useMemo<WardCoordinate[]>(
+      () =>
+        backendWards.map(
+          (
+            ward
+          ) => ({
+
+            ward:
+              ward.ward,
+
+            latitude:
+              ward.latitude,
+
+            longitude:
+              ward.longitude,
+
+          })
+        ),
+      [
+        backendWards,
+      ]
+    );
+
+
+  /* ========================================================================= */
+  /* PROPAGATION FORECAST                                                     */
+  /* ========================================================================= */
+
+  const propagation:
+    WardPropagationResult | null =
+    useMemo(
+      () => {
+
+        if (
+          !selectedWard ||
+          coordinates.length ===
+            0
+        ) {
+
+          return null;
+
+        }
+
+
+        return calculateWardPropagation(
+          selectedWard.ward,
+          wardRisks,
+          coordinates
+        );
+
+      },
+      [
+        selectedWard,
+        wardRisks,
+        coordinates,
+      ]
+    );
+
+
+  /* ========================================================================= */
+  /* WARD SELECTION                                                           */
+  /* ========================================================================= */
+
+  const handleWardSelect =
+    useCallback(
+      (
+        ward:
+          WardRisk
+      ) => {
+
+        setSelectedWard(
+          ward
+        );
+
+
+        setModalOpen(
+          true
+        );
+
+      },
+      []
+    );
+
+
+  const handleCloseWardModal =
+    useCallback(
+      () => {
+
+        setModalOpen(
+          false
+        );
+
+      },
+      []
+    );
+
+
+  /* ========================================================================= */
   /* ROLE                                                                      */
   /* ========================================================================= */
 
@@ -609,7 +759,7 @@ export default function Home() {
 
 
   /* ========================================================================= */
-  /* RISK DISTRIBUTION                                                         */
+  /* RISK DISTRIBUTION                                                        */
   /* ========================================================================= */
 
   const totalWards =
@@ -688,20 +838,13 @@ export default function Home() {
 
         <section className="min-w-0 p-4 sm:p-6 lg:p-8">
 
-
           {/* =============================================================== */}
           {/* HERO                                                            */}
           {/* =============================================================== */}
 
           <div className="relative min-h-[570px] overflow-hidden rounded-[26px] border border-blue-500/25 bg-[#0a1728] shadow-[0_25px_80px_rgba(0,0,0,0.25)]">
 
-
-            {/* ============================================================= */}
-            {/* HERO BACKGROUND                                               */}
-            {/* ============================================================= */}
-
             <div className="absolute inset-0">
-
 
               <div
                 className="absolute inset-0 bg-cover bg-center xl:bg-[center_55%]"
@@ -741,19 +884,11 @@ export default function Home() {
             </div>
 
 
-            {/* ============================================================= */}
-            {/* HERO CONTENT                                                  */}
-            {/* ============================================================= */}
-
             <div className="relative grid min-h-[570px] gap-8 p-6 md:p-8 xl:grid-cols-[1.15fr_0.85fr] xl:p-10">
 
-
-              {/* =========================================================== */}
-              {/* LEFT CONTENT                                                */}
-              {/* =========================================================== */}
+              {/* LEFT */}
 
               <div className="flex flex-col justify-center py-4 xl:py-8">
-
 
                 <div className="mb-5 flex w-fit items-center gap-2 rounded-full border border-blue-400/20 bg-[#07111f]/65 px-3 py-1.5 backdrop-blur-md">
 
@@ -785,11 +920,9 @@ export default function Home() {
                     Predict.
                   </span>
 
-
                   <span className="block text-blue-400">
                     Prepare.
                   </span>
-
 
                   <span className="block text-emerald-400">
                     Protect.
@@ -799,9 +932,7 @@ export default function Home() {
 
 
                 <p className="mt-6 text-xl font-semibold text-slate-100">
-
                   Together for a Safer Tomorrow.
-
                 </p>
 
 
@@ -869,23 +1000,18 @@ export default function Home() {
               </div>
 
 
-              {/* =========================================================== */}
-              {/* RIGHT STATUS                                                */}
-              {/* =========================================================== */}
+              {/* RIGHT STATUS */}
 
               <div className="flex items-center justify-center xl:justify-end">
 
                 <div className="w-full max-w-[470px] rounded-2xl border border-blue-400/20 bg-[#07111f]/82 p-5 shadow-[0_24px_80px_rgba(0,0,0,0.4)] backdrop-blur-xl">
-
 
                   <div className="flex items-center justify-between">
 
                     <div>
 
                       <p className="font-semibold text-white">
-
                         Current Status
-
                       </p>
 
 
@@ -933,9 +1059,7 @@ export default function Home() {
                   <div className="mt-6 grid grid-cols-3 divide-x divide-white/10">
 
                     <StatusMetric
-                      icon={
-                        CloudRain
-                      }
+                      icon={CloudRain}
                       value={`${averageRainfall}`}
                       unit="mm"
                       label="Avg. Rainfall"
@@ -944,9 +1068,7 @@ export default function Home() {
 
 
                     <StatusMetric
-                      icon={
-                        Waves
-                      }
+                      icon={Waves}
                       value={`${averageRiverLevel}`}
                       unit="cm"
                       label="River Level"
@@ -955,9 +1077,7 @@ export default function Home() {
 
 
                     <StatusMetric
-                      icon={
-                        AlertTriangle
-                      }
+                      icon={AlertTriangle}
                       value={`${atRiskCount}`}
                       unit=""
                       label="At Risk"
@@ -969,37 +1089,35 @@ export default function Home() {
 
                   {highestRiskWard && (
 
-                    <div className="mt-6 rounded-xl border border-white/5 bg-white/[0.035] p-4">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        handleWardSelect(
+                          highestRiskWard
+                        )
+                      }
+                      className="mt-6 w-full rounded-xl border border-white/5 bg-white/[0.035] p-4 text-left transition hover:border-blue-400/20 hover:bg-white/[0.06]"
+                    >
 
                       <div className="flex items-center justify-between gap-4">
 
                         <div>
 
                           <p className="text-[10px] uppercase tracking-wider text-slate-500">
-
                             Highest Risk Ward
-
                           </p>
 
 
                           <p className="mt-1 text-lg font-bold text-white">
-
-                            {
-                              highestRiskWard.ward
-                            }
-
+                            {highestRiskWard.ward}
                           </p>
 
 
                           <p className="mt-1 text-[10px] text-slate-500">
 
-                            {
-                              highestRiskWard.level
-                            }{" "}
-                            •{" "}
-                            {
-                              highestRiskWard.primaryHazard
-                            }
+                            {highestRiskWard.level}
+                            {" • "}
+                            {highestRiskWard.primaryHazard}
 
                           </p>
 
@@ -1009,25 +1127,18 @@ export default function Home() {
                         <div className="text-right">
 
                           <p className="text-2xl font-black text-red-400">
-
-                            {
-                              highestRiskWard.risk
-                            }
-
+                            {highestRiskWard.risk}
                           </p>
 
-
                           <p className="text-[10px] text-slate-500">
-
                             /100
-
                           </p>
 
                         </div>
 
                       </div>
 
-                    </div>
+                    </button>
 
                   )}
 
@@ -1037,9 +1148,7 @@ export default function Home() {
                     <div>
 
                       <p className="text-[9px] uppercase tracking-wider text-slate-600">
-
                         Data Mode
-
                       </p>
 
 
@@ -1060,11 +1169,8 @@ export default function Home() {
 
                       <span className="h-2 w-2 rounded-full bg-emerald-400" />
 
-
                       <span className="text-xs text-slate-400">
-
                         Live Monitoring
-
                       </span>
 
                     </div>
@@ -1086,33 +1192,18 @@ export default function Home() {
 
           <div className="mt-7 grid gap-6 2xl:grid-cols-[1fr_360px]">
 
-
-            {/* ============================================================= */}
-            {/* LEFT COLUMN                                                   */}
-            {/* ============================================================= */}
-
             <div>
-
-
-              {/* =========================================================== */}
-              {/* LIVE OVERVIEW                                               */}
-              {/* =========================================================== */}
 
               <div className="mb-4 flex items-center justify-between">
 
                 <div>
 
                   <h2 className="text-xl font-bold">
-
                     Live Overview
-
                   </h2>
 
-
                   <p className="mt-1 text-xs text-slate-500">
-
                     Current operational picture across monitored wards.
-
                   </p>
 
                 </div>
@@ -1131,44 +1222,31 @@ export default function Home() {
 
                 <OverviewCard
                   title="Total Wards"
-                  value={
-                    totalWards
-                  }
+                  value={totalWards}
                   subtitle="Bhubaneswar monitored"
-                  icon={
-                    Building2
-                  }
+                  icon={Building2}
                   tone="blue"
                 />
 
 
                 <OverviewCard
                   title="At Risk Wards"
-                  value={
-                    atRiskCount
-                  }
+                  value={atRiskCount}
                   subtitle={
-                    atRiskCount ===
-                    0
+                    atRiskCount === 0
                       ? "No elevated risk"
                       : "Require monitoring"
                   }
-                  icon={
-                    AlertTriangle
-                  }
+                  icon={AlertTriangle}
                   tone="red"
                 />
 
 
                 <OverviewCard
                   title="Verified Reports"
-                  value={
-                    verifiedReports
-                  }
+                  value={verifiedReports}
                   subtitle="Ground evidence confirmed"
-                  icon={
-                    FileCheck2
-                  }
+                  icon={FileCheck2}
                   tone="purple"
                 />
 
@@ -1176,11 +1254,9 @@ export default function Home() {
                 <OverviewCard
                   title="Emergency Status"
                   value={
-                    criticalCount >
-                    0
+                    criticalCount > 0
                       ? "Critical"
-                      : highCount >
-                          0
+                      : highCount > 0
                         ? "Elevated"
                         : "Normal"
                   }
@@ -1189,18 +1265,14 @@ export default function Home() {
                       ? "Monitoring active"
                       : "Backend degraded"
                   }
-                  icon={
-                    ShieldCheck
-                  }
+                  icon={ShieldCheck}
                   tone="green"
                 />
 
               </div>
 
 
-              {/* =========================================================== */}
-              {/* WARD RISK INTELLIGENCE                                      */}
-              {/* =========================================================== */}
+              {/* HIGHEST RISK WARDS */}
 
               <div className="mt-6 rounded-2xl border border-white/10 bg-[#0a1728] p-5 sm:p-6">
 
@@ -1209,23 +1281,15 @@ export default function Home() {
                   <div>
 
                     <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-blue-400">
-
                       Risk Intelligence
-
                     </p>
 
-
                     <h2 className="mt-1 text-lg font-bold text-white">
-
                       Highest-Risk Wards
-
                     </h2>
 
-
                     <p className="mt-1 text-xs text-slate-500">
-
-                      Wards currently requiring the highest level of monitoring.
-
+                      Click any ward to inspect its risk intelligence and recommended response.
                     </p>
 
                   </div>
@@ -1248,8 +1312,7 @@ export default function Home() {
                 <div className="mt-6 space-y-3">
 
                   {
-                    topRiskWards.length >
-                    0
+                    topRiskWards.length > 0
                       ? topRiskWards.map(
                           (
                             ward,
@@ -1257,15 +1320,13 @@ export default function Home() {
                           ) => (
 
                             <TopRiskWardRow
-                              key={
-                                ward.ward
-                              }
-                              ward={
-                                ward
-                              }
-                              rank={
-                                index +
-                                1
+                              key={ward.ward}
+                              ward={ward}
+                              rank={index + 1}
+                              onClick={() =>
+                                handleWardSelect(
+                                  ward
+                                )
                               }
                             />
 
@@ -1276,9 +1337,7 @@ export default function Home() {
                         <div className="rounded-xl border border-white/5 bg-white/[0.02] p-6 text-center">
 
                           <p className="text-sm text-slate-500">
-
                             Waiting for ward risk data...
-
                           </p>
 
                         </div>
@@ -1291,14 +1350,8 @@ export default function Home() {
               </div>
 
 
-              {/* =========================================================== */}
-              {/* SAFETY BANNER                                               */}
-              {/* =========================================================== */}
-
               <Link
-                href={
-                  alertsHref
-                }
+                href={alertsHref}
                 className="group mt-6 flex items-center justify-between rounded-2xl border border-blue-500/15 bg-gradient-to-r from-blue-500/10 to-transparent p-5 transition hover:border-blue-500/30"
               >
 
@@ -1314,9 +1367,7 @@ export default function Home() {
                   <div>
 
                     <p className="font-semibold text-white">
-
                       Early action saves lives.
-
                     </p>
 
 
@@ -1342,30 +1393,18 @@ export default function Home() {
             </div>
 
 
-            {/* ============================================================= */}
-            {/* RIGHT COLUMN                                                  */}
-            {/* ============================================================= */}
+            {/* RIGHT COLUMN */}
 
             <div className="space-y-6">
-
-
-              {/* =========================================================== */}
-              {/* RISK DISTRIBUTION                                           */}
-              {/* =========================================================== */}
 
               <div className="rounded-2xl border border-white/10 bg-[#0a1728] p-5">
 
                 <h2 className="font-semibold">
-
                   Risk Distribution
-
                 </h2>
 
-
                 <p className="mt-1 text-xs text-slate-500">
-
                   Current ward risk classification
-
                 </p>
 
 
@@ -1382,18 +1421,11 @@ export default function Home() {
                     <div className="flex h-28 w-28 flex-col items-center justify-center rounded-full bg-[#0a1728] shadow-inner">
 
                       <p className="text-3xl font-bold">
-
-                        {
-                          totalWards
-                        }
-
+                        {totalWards}
                       </p>
 
-
                       <p className="text-[10px] uppercase tracking-wider text-slate-500">
-
                         Wards
-
                       </p>
 
                     </div>
@@ -1405,48 +1437,29 @@ export default function Home() {
 
                     <RiskLegendRow
                       label="Critical"
-                      count={
-                        criticalCount
-                      }
-                      percentage={
-                        criticalPercentage
-                      }
+                      count={criticalCount}
+                      percentage={criticalPercentage}
                       dotClass="bg-red-500"
                     />
 
-
                     <RiskLegendRow
                       label="High"
-                      count={
-                        highCount
-                      }
-                      percentage={
-                        highPercentage
-                      }
+                      count={highCount}
+                      percentage={highPercentage}
                       dotClass="bg-orange-500"
                     />
 
-
                     <RiskLegendRow
                       label="Watch"
-                      count={
-                        watchCount
-                      }
-                      percentage={
-                        watchPercentage
-                      }
+                      count={watchCount}
+                      percentage={watchPercentage}
                       dotClass="bg-yellow-400"
                     />
 
-
                     <RiskLegendRow
                       label="Normal"
-                      count={
-                        normalCount
-                      }
-                      percentage={
-                        normalPercentage
-                      }
+                      count={normalCount}
+                      percentage={normalPercentage}
                       dotClass="bg-emerald-400"
                     />
 
@@ -1456,10 +1469,6 @@ export default function Home() {
 
               </div>
 
-
-              {/* =========================================================== */}
-              {/* MONITORING AREA                                             */}
-              {/* =========================================================== */}
 
               <div className="rounded-2xl border border-white/10 bg-[#0a1728] p-5">
 
@@ -1475,16 +1484,11 @@ export default function Home() {
                   <div>
 
                     <p className="text-xs text-slate-500">
-
                       Monitoring Area
-
                     </p>
 
-
                     <p className="font-semibold">
-
                       Bhubaneswar
-
                     </p>
 
                   </div>
@@ -1495,22 +1499,16 @@ export default function Home() {
                 <div className="mt-4 rounded-xl border border-white/5 bg-[#07111f] p-4">
 
                   <p className="text-[10px] uppercase tracking-wider text-slate-600">
-
                     Coverage
-
                   </p>
 
 
                   <p className="mt-2 text-2xl font-bold text-white">
 
-                    {
-                      totalWards
-                    }{" "}
+                    {totalWards}{" "}
 
                     <span className="text-sm font-normal text-slate-500">
-
                       wards
-
                     </span>
 
                   </p>
@@ -1520,11 +1518,8 @@ export default function Home() {
 
                     <CheckCircle2 className="h-4 w-4 text-emerald-400" />
 
-
                     <p className="text-xs text-slate-500">
-
                       Odisha, India
-
                     </p>
 
                   </div>
@@ -1540,6 +1535,22 @@ export default function Home() {
         </section>
 
       </div>
+
+
+      {/* ================================================================ */}
+      {/* WARD DETAIL MODAL                                                */}
+      {/* ================================================================ */}
+
+      {selectedWard &&
+        modalOpen && (
+
+          <WardDetailModal
+            wardRisk={selectedWard}
+            propagation={propagation}
+            onClose={handleCloseWardModal}
+          />
+
+        )}
 
     </main>
 
@@ -1558,20 +1569,11 @@ function StatusMetric({
   label,
   iconClass,
 }: {
-  icon:
-    LucideIcon;
-
-  value:
-    string;
-
-  unit:
-    string;
-
-  label:
-    string;
-
-  iconClass:
-    string;
+  icon: LucideIcon;
+  value: string;
+  unit: string;
+  label: string;
+  iconClass: string;
 }) {
 
   return (
@@ -1585,19 +1587,12 @@ function StatusMetric({
 
       <p className="mt-3 text-xl font-bold text-white">
 
-        {
-          value
-        }
-
+        {value}
 
         {unit && (
 
           <span className="ml-1 text-xs font-normal text-slate-500">
-
-            {
-              unit
-            }
-
+            {unit}
           </span>
 
         )}
@@ -1606,11 +1601,7 @@ function StatusMetric({
 
 
       <p className="mt-1 text-[9px] text-slate-500">
-
-        {
-          label
-        }
-
+        {label}
       </p>
 
     </div>
@@ -1697,29 +1688,17 @@ function OverviewCard({
 
 
       <p className="mt-5 text-xs text-slate-500">
-
-        {
-          title
-        }
-
+        {title}
       </p>
 
 
       <p className="mt-1 text-2xl font-bold text-white">
-
-        {
-          value
-        }
-
+        {value}
       </p>
 
 
       <p className="mt-2 text-[10px] text-slate-600">
-
-        {
-          subtitle
-        }
-
+        {subtitle}
       </p>
 
     </article>
@@ -1735,12 +1714,11 @@ function OverviewCard({
 function TopRiskWardRow({
   ward,
   rank,
+  onClick,
 }: {
-  ward:
-    WardRisk;
-
-  rank:
-    number;
+  ward: WardRisk;
+  rank: number;
+  onClick: () => void;
 }) {
 
   const styles:
@@ -1818,56 +1796,39 @@ function TopRiskWardRow({
 
   return (
 
-    <div className="rounded-xl border border-white/5 bg-[#07111f] p-4 transition hover:border-white/10 hover:bg-[#091626]">
+    <button
+      type="button"
+      onClick={onClick}
+      className="w-full cursor-pointer rounded-xl border border-white/5 bg-[#07111f] p-4 text-left transition hover:border-blue-400/30 hover:bg-[#091626] focus:outline-none focus:ring-2 focus:ring-blue-500/30"
+    >
 
       <div className="flex items-center gap-4">
 
-
-        {/* RANK */}
-
         <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-white/[0.04] text-xs font-bold text-slate-400">
-
-          {
-            rank
-          }
-
+          {rank}
         </div>
 
-
-        {/* INFORMATION */}
 
         <div className="min-w-0 flex-1">
 
           <div className="flex flex-wrap items-center gap-2">
 
             <p className="font-semibold text-white">
-
-              {
-                ward.ward
-              }
-
+              {ward.ward}
             </p>
 
 
             <span
               className={`rounded-full px-2 py-0.5 text-[9px] font-bold tracking-wider ring-1 ${style.badge} ${style.text}`}
             >
-
-              {
-                ward.level
-              }
-
+              {ward.level}
             </span>
 
           </div>
 
 
           <p className="mt-1 truncate text-xs text-slate-500">
-
-            {
-              ward.primaryHazard
-            }
-
+            {ward.primaryHazard}
           </p>
 
 
@@ -1886,32 +1847,24 @@ function TopRiskWardRow({
         </div>
 
 
-        {/* RISK SCORE */}
-
         <div className="shrink-0 text-right">
 
           <p
             className={`text-xl font-black ${style.text}`}
           >
-
-            {
-              ward.risk
-            }
-
+            {ward.risk}
           </p>
 
 
           <p className="text-[9px] text-slate-600">
-
             /100
-
           </p>
 
         </div>
 
       </div>
 
-    </div>
+    </button>
 
   );
 }
@@ -1927,17 +1880,10 @@ function RiskLegendRow({
   percentage,
   dotClass,
 }: {
-  label:
-    string;
-
-  count:
-    number;
-
-  percentage:
-    number;
-
-  dotClass:
-    string;
+  label: string;
+  count: number;
+  percentage: number;
+  dotClass: string;
 }) {
 
   return (
@@ -1952,11 +1898,7 @@ function RiskLegendRow({
 
 
         <span className="text-xs text-slate-400">
-
-          {
-            label
-          }
-
+          {label}
         </span>
 
       </div>
@@ -1965,22 +1907,12 @@ function RiskLegendRow({
       <div className="text-xs">
 
         <span className="font-medium text-slate-200">
-
-          {
-            count
-          }
-
+          {count}
         </span>
 
 
         <span className="ml-1 text-slate-600">
-
-          (
-          {
-            percentage
-          }
-          %)
-
+          ({percentage}%)
         </span>
 
       </div>
