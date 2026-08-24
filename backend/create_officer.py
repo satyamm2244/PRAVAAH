@@ -1,3 +1,4 @@
+import os
 import time
 import uuid
 
@@ -7,35 +8,58 @@ from auth import hash_password, normalize_email
 
 
 def create_officer():
-
     db = SessionLocal()
 
     try:
+        name = os.getenv(
+            "OFFICER_NAME",
+            "PRAVAAH Officer",
+        ).strip()
 
-        print("\n==============================")
-        print("   PRAVAAH OFFICER CREATION")
-        print("==============================\n")
-
-        name = input("Officer name: ").strip()
         email = normalize_email(
-            input("Officer email: ")
+            os.getenv(
+                "OFFICER_EMAIL",
+                "",
+            )
         )
-        password = input(
-            "Officer password: "
+
+        password = os.getenv(
+            "OFFICER_PASSWORD",
+            "",
         )
+
+        if not email:
+            print(
+                "OFFICER_EMAIL is missing. "
+                "Officer account was not created."
+            )
+            return
+
+        if not password:
+            print(
+                "OFFICER_PASSWORD is missing. "
+                "Officer account was not created."
+            )
+            return
 
         existing_user = (
             db.query(User)
-            .filter(User.email == email)
+            .filter(
+                User.email == email
+            )
             .first()
         )
 
         if existing_user:
-
             print(
-                "\nAccount already exists "
-                "with this email."
+                f"Account already exists for {email}."
             )
+
+            if existing_user.role != "OFFICER":
+                print(
+                    "Existing account is not an OFFICER."
+                )
+
             return
 
         officer = User(
@@ -55,23 +79,32 @@ def create_officer():
 
         db.add(officer)
         db.commit()
+        db.refresh(officer)
 
-        print("\nOfficer created successfully.")
-        print(f"Name : {officer.name}")
-        print(f"Email: {officer.email}")
-        print(f"Role : {officer.role}")
+        print(
+            "Officer created successfully."
+        )
+        print(
+            f"Name: {officer.name}"
+        )
+        print(
+            f"Email: {officer.email}"
+        )
+        print(
+            f"Role: {officer.role}"
+        )
 
     except Exception as error:
-
         db.rollback()
 
         print(
-            "\nUnable to create officer."
+            "Unable to create officer."
         )
         print(error)
 
-    finally:
+        raise
 
+    finally:
         db.close()
 
 
