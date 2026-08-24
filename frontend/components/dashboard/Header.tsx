@@ -806,7 +806,7 @@ export default function Header() {
         user?.role ===
         "OFFICER"
           ? "/alerts"
-          : "/citizen-dashboard";
+          : "/citizen-alerts";
 
 
       return;
