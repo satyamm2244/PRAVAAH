@@ -247,6 +247,208 @@ def get_alert_history(
     ]
 
 # =============================================================================
+# CREATE / PUBLISH ALERT
+# =============================================================================
+
+@app.post(
+    "/api/alerts",
+    status_code=201,
+)
+def publish_alert(
+    request: AlertCreateRequest,
+    db: Session = Depends(get_db),
+    current_officer=Depends(require_officer),
+):
+    ward_id = normalize_ward(
+        request.ward
+    )
+
+    existing_alert = (
+        db.query(Alert)
+        .filter(
+            Alert.id == request.id
+        )
+        .first()
+    )
+
+    if existing_alert:
+        raise HTTPException(
+            status_code=409,
+            detail="Alert already exists.",
+        )
+
+    now = int(
+        time.time() * 1000
+    )
+
+    alert = Alert(
+        id=request.id,
+
+        ward=ward_id,
+
+        priority=request.priority.strip().upper(),
+
+        trigger=request.trigger.strip().upper(),
+
+        level=request.level.strip().upper(),
+
+        title=request.title.strip(),
+
+        message=request.message.strip(),
+
+        risk=request.risk,
+
+        confidence=request.confidence,
+
+        primary_hazard=
+            request.primaryHazard.strip(),
+
+        recommended_action=
+            request.recommendedAction.strip(),
+
+        status="PUBLISHED",
+
+        published_by=
+            getattr(
+                current_officer,
+                "id",
+                None,
+            ),
+
+        created_at=
+            request.createdAt,
+
+        published_at=
+            now,
+
+        dismissed_at=
+            None,
+    )
+
+    try:
+        db.add(alert)
+
+        create_notification(
+            db=db,
+            recipient_role="USER",
+            notification_type="ALERT",
+            severity=request.level,
+            title=request.title,
+            message=request.message,
+            ward=ward_id,
+            action_type="VIEW_ALERT",
+            action_target=request.id,
+        )
+
+        db.commit()
+
+        db.refresh(alert)
+
+    except Exception as error:
+        db.rollback()
+
+        print(
+            "Unable to publish alert:",
+            error,
+        )
+
+        raise HTTPException(
+            status_code=500,
+            detail="Unable to publish alert.",
+        )
+
+    return alert_to_dict(
+        alert
+    )
+
+
+# =============================================================================
+# GET PUBLIC PUBLISHED ALERTS
+# =============================================================================
+
+@app.get("/api/alerts")
+def get_published_alerts(
+    db: Session = Depends(get_db),
+):
+    alerts = (
+        db.query(Alert)
+        .filter(
+            Alert.status == "PUBLISHED"
+        )
+        .order_by(
+            Alert.published_at.desc()
+        )
+        .all()
+    )
+
+    return [
+        alert_to_dict(alert)
+        for alert in alerts
+    ]
+
+
+# =============================================================================
+# DISMISS ALERT
+# =============================================================================
+
+@app.patch(
+    "/api/alerts/{alert_id}/dismiss"
+)
+def dismiss_alert(
+    alert_id: str,
+    db: Session = Depends(get_db),
+    current_officer=Depends(require_officer),
+):
+    alert = (
+        db.query(Alert)
+        .filter(
+            Alert.id == alert_id
+        )
+        .first()
+    )
+
+    if alert is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Alert not found.",
+        )
+
+    if alert.status == "DISMISSED":
+        return alert_to_dict(
+            alert
+        )
+
+    alert.status = "DISMISSED"
+
+    alert.dismissed_at = int(
+        time.time() * 1000
+    )
+
+    try:
+        db.commit()
+
+        db.refresh(
+            alert
+        )
+
+    except Exception as error:
+        db.rollback()
+
+        print(
+            "Unable to dismiss alert:",
+            error,
+        )
+
+        raise HTTPException(
+            status_code=500,
+            detail="Unable to dismiss alert.",
+        )
+
+    return alert_to_dict(
+        alert
+    )
+
+# =============================================================================
 # SERIALIZERS
 # =============================================================================
 
