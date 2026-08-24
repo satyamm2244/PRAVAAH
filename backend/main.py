@@ -6,6 +6,7 @@ from fastapi import (
     Form,
     Depends,
 )
+from create_officer import create_officer
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
@@ -55,6 +56,14 @@ from emergency_assistant import generate_emergency_response
 # =============================================================================
 
 Base.metadata.create_all(bind=engine)
+
+try:
+    create_officer()
+except Exception as error:
+    print(
+        "Officer bootstrap failed:",
+        error,
+    )
 
 
 # =============================================================================
