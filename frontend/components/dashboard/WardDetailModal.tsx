@@ -4,13 +4,20 @@ import {
   AlertTriangle,
   CheckCircle2,
   Clock3,
+  CloudRain,
+  FileCheck2,
+  Gauge,
+  MapPin,
   MapPinned,
   Route,
+  ShieldCheck,
   Users,
+  Waves,
   X,
 } from "lucide-react";
 
 import type {
+  RiskLevel,
   WardRisk,
 } from "@/lib/risk-engine";
 
@@ -20,8 +27,58 @@ import type {
 } from "@/lib/propagation-engine";
 
 
+/* ========================================================================= */
+/* TYPES                                                                     */
+/* ========================================================================= */
+
+export type BackendWardDetail = {
+  ward: string;
+
+  rainfallMm: number;
+
+  riverLevelCm: number;
+
+  reportCount: number;
+
+  verifiedReportCount?: number;
+
+  pendingReportCount?: number;
+
+  rejectedReportCount?: number;
+
+  totalReportCount?: number;
+
+  latitude: number;
+
+  longitude: number;
+
+  dataMode?: string;
+
+  sources?: {
+    rainfall?: string;
+
+    rainfallMode?: string;
+
+    riverLevel?: string;
+
+    riverLevelMode?: string;
+
+    riverLevelTimestamp?: number | null;
+
+    crowdReports?: string;
+
+    crowdReportsMode?: string;
+  };
+
+  timestamp?: number;
+};
+
+
 type WardDetailModalProps = {
   wardRisk: WardRisk;
+
+  wardData?:
+    BackendWardDetail | null;
 
   propagation?:
     WardPropagationResult | null;
@@ -29,6 +86,10 @@ type WardDetailModalProps = {
   onClose: () => void;
 };
 
+
+/* ========================================================================= */
+/* STYLES                                                                    */
+/* ========================================================================= */
 
 const levelColor = {
   CRITICAL:
@@ -77,25 +138,36 @@ const likelihoodStyles:
   };
 
 
+/* ========================================================================= */
+/* COMPONENT                                                                 */
+/* ========================================================================= */
+
 export default function WardDetailModal({
   wardRisk,
+  wardData,
   propagation,
   onClose,
 }: WardDetailModalProps) {
 
+  const precautions =
+    getWardPrecautions(
+      wardRisk.level,
+      wardRisk.primaryHazard
+    );
+
+
   return (
+
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4 backdrop-blur-sm"
       role="dialog"
       aria-modal="true"
       aria-labelledby="ward-detail-title"
-      onClick={
-        onClose
-      }
+      onClick={onClose}
     >
 
       <div
-        className="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-2xl border border-white/10 bg-[#0a1728] p-6 shadow-2xl"
+        className="max-h-[92vh] w-full max-w-3xl overflow-y-auto rounded-2xl border border-white/10 bg-[#0a1728] p-6 shadow-2xl"
         onClick={(
           event
         ) =>
@@ -126,9 +198,9 @@ export default function WardDetailModal({
 
             <h2
               id="ward-detail-title"
-              className="mt-3 text-xl font-bold text-white"
+              className="mt-3 text-2xl font-bold text-white"
             >
-              {
+              Ward {
                 wardRisk.ward
               }
             </h2>
@@ -145,78 +217,228 @@ export default function WardDetailModal({
 
           <button
             type="button"
-            onClick={
-              onClose
-            }
+            onClick={onClose}
             className="rounded-lg p-2 text-slate-500 transition hover:bg-white/5 hover:text-white"
             aria-label="Close ward details"
           >
-
             <X className="h-5 w-5" />
-
           </button>
 
         </div>
 
 
         {/* =============================================================== */}
-        {/* TOP METRICS                                                      */}
+        {/* WARD DETAILS                                                    */}
         {/* =============================================================== */}
 
-        <div className="mt-6 grid grid-cols-2 gap-3">
+        <section className="mt-7">
 
-          <div className="rounded-xl border border-white/5 bg-white/[0.03] p-4">
+          <div className="flex items-center gap-2">
 
-            <p className="text-[10px] uppercase tracking-wider text-slate-500">
-              Risk Score
-            </p>
+            <MapPin className="h-4 w-4 text-blue-400" />
+
+            <h3 className="text-sm font-semibold text-white">
+              Ward Details
+            </h3>
+
+          </div>
 
 
-            <div className="mt-1 flex items-end gap-1">
+          <p className="mt-2 text-xs leading-5 text-slate-500">
+            Current environmental conditions,
+            verified citizen evidence and
+            geographic information for this
+            monitored ward.
+          </p>
 
-              <p className="text-3xl font-bold text-white">
-                {
-                  wardRisk.risk
+
+          <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3">
+
+            <DetailMetric
+              icon={MapPinned}
+              label="Ward"
+              value={
+                wardRisk.ward
+              }
+            />
+
+
+            <DetailMetric
+              icon={CloudRain}
+              label="Rainfall"
+              value={
+                wardData
+                  ? `${wardData.rainfallMm} mm`
+                  : "Unavailable"
+              }
+            />
+
+
+            <DetailMetric
+              icon={Waves}
+              label="River Level"
+              value={
+                wardData
+                  ? `${wardData.riverLevelCm} cm`
+                  : "Unavailable"
+              }
+            />
+
+
+            <DetailMetric
+              icon={FileCheck2}
+              label="Verified Reports"
+              value={
+                `${
+                  wardData
+                    ?.verifiedReportCount ??
+                  wardData
+                    ?.reportCount ??
+                  0
+                }`
+              }
+            />
+
+
+            <DetailMetric
+              icon={MapPin}
+              label="Latitude"
+              value={
+                wardData
+                  ? wardData.latitude.toFixed(
+                      5
+                    )
+                  : "Unavailable"
+              }
+            />
+
+
+            <DetailMetric
+              icon={MapPin}
+              label="Longitude"
+              value={
+                wardData
+                  ? wardData.longitude.toFixed(
+                      5
+                    )
+                  : "Unavailable"
+              }
+            />
+
+          </div>
+
+
+          {wardData && (
+
+            <div className="mt-3 grid gap-3 sm:grid-cols-3">
+
+              <EvidenceMetric
+                label="Pending Reports"
+                value={
+                  wardData.pendingReportCount ??
+                  0
                 }
+              />
+
+
+              <EvidenceMetric
+                label="Rejected Reports"
+                value={
+                  wardData.rejectedReportCount ??
+                  0
+                }
+              />
+
+
+              <EvidenceMetric
+                label="Total Reports"
+                value={
+                  wardData.totalReportCount ??
+                  wardData.reportCount ??
+                  0
+                }
+              />
+
+            </div>
+
+          )}
+
+        </section>
+
+
+        {/* =============================================================== */}
+        {/* RISK SUMMARY                                                    */}
+        {/* =============================================================== */}
+
+        <section className="mt-7">
+
+          <div className="flex items-center gap-2">
+
+            <Gauge className="h-4 w-4 text-blue-400" />
+
+            <h3 className="text-sm font-semibold text-white">
+              Current Risk Assessment
+            </h3>
+
+          </div>
+
+
+          <div className="mt-4 grid grid-cols-2 gap-3">
+
+            <div className="rounded-xl border border-white/5 bg-white/[0.03] p-4">
+
+              <p className="text-[10px] uppercase tracking-wider text-slate-500">
+                Risk Score
               </p>
 
-              <p className="mb-1 text-sm text-slate-500">
-                /100
+
+              <div className="mt-1 flex items-end gap-1">
+
+                <p className="text-3xl font-bold text-white">
+                  {
+                    wardRisk.risk
+                  }
+                </p>
+
+                <p className="mb-1 text-sm text-slate-500">
+                  /100
+                </p>
+
+              </div>
+
+            </div>
+
+
+            <div className="rounded-xl border border-white/5 bg-white/[0.03] p-4">
+
+              <p className="text-[10px] uppercase tracking-wider text-slate-500">
+                Confidence
               </p>
+
+
+              <div className="mt-1 flex items-end gap-1">
+
+                <p className="text-3xl font-bold text-white">
+                  {
+                    wardRisk.confidence
+                  }
+                </p>
+
+                <p className="mb-1 text-sm text-slate-500">
+                  %
+                </p>
+
+              </div>
 
             </div>
 
           </div>
 
-
-          <div className="rounded-xl border border-white/5 bg-white/[0.03] p-4">
-
-            <p className="text-[10px] uppercase tracking-wider text-slate-500">
-              Confidence
-            </p>
-
-
-            <div className="mt-1 flex items-end gap-1">
-
-              <p className="text-3xl font-bold text-white">
-                {
-                  wardRisk.confidence
-                }
-              </p>
-
-              <p className="mb-1 text-sm text-slate-500">
-                %
-              </p>
-
-            </div>
-
-          </div>
-
-        </div>
+        </section>
 
 
         {/* =============================================================== */}
-        {/* EXPLAINABLE RISK                                                */}
+        {/* WHY THIS WARD IS AT RISK                                        */}
         {/* =============================================================== */}
 
         <section className="mt-7">
@@ -375,12 +597,14 @@ export default function WardDetailModal({
 
 
                   <p className="mt-1 text-xs leading-5 text-slate-500">
+
                     Forecast of nearby wards
                     that may deteriorate if
                     current conditions in{" "}
                     {
                       wardRisk.ward
                     } continue.
+
                   </p>
 
                 </div>
@@ -484,18 +708,14 @@ export default function WardDetailModal({
                         <div className="grid grid-cols-2 gap-2">
 
                           <MiniMetric
-                            icon={
-                              Clock3
-                            }
+                            icon={Clock3}
                             label="ETA"
                             value={`${forecast.estimatedMinutes} min`}
                           />
 
 
                           <MiniMetric
-                            icon={
-                              Route
-                            }
+                            icon={Route}
                             label="Distance"
                             value={`${forecast.distanceKm} km`}
                           />
@@ -505,8 +725,6 @@ export default function WardDetailModal({
                       </div>
 
 
-                      {/* POPULATION */}
-
                       {forecast.affectedPopulation !==
                         null && (
 
@@ -514,9 +732,7 @@ export default function WardDetailModal({
 
                           <Users className="h-3.5 w-3.5 text-slate-500" />
 
-
                           Potential population exposure:
-
 
                           <span className="font-medium text-slate-300">
 
@@ -533,8 +749,6 @@ export default function WardDetailModal({
                       )}
 
 
-                      {/* DRIVERS */}
-
                       <div className="mt-3 flex flex-wrap gap-1.5">
 
                         {forecast.drivers.map(
@@ -548,20 +762,15 @@ export default function WardDetailModal({
                             }
                             className="rounded-md bg-white/[0.04] px-2 py-1 text-[10px] text-slate-400"
                           >
-
                             {
                               driver
                             }
-
                           </span>
 
-                        )
-                      )}
+                        ))}
 
                       </div>
 
-
-                      {/* TARGET STATUS */}
 
                       <div className="mt-4 grid grid-cols-2 gap-2 border-t border-white/5 pt-3">
 
@@ -599,8 +808,7 @@ export default function WardDetailModal({
 
                     </div>
 
-                  )
-                )}
+                  ))}
 
               </div>
 
@@ -612,7 +820,7 @@ export default function WardDetailModal({
 
 
         {/* =============================================================== */}
-        {/* RECOMMENDED ACTION                                              */}
+        {/* OFFICER RECOMMENDED ACTION                                      */}
         {/* =============================================================== */}
 
         <section className="mt-7">
@@ -639,7 +847,12 @@ export default function WardDetailModal({
 
               <div>
 
-                <h3 className="text-sm font-semibold text-white">
+                <p className="text-[9px] font-bold uppercase tracking-[0.15em] text-blue-400">
+                  Officer Decision Support
+                </p>
+
+
+                <h3 className="mt-1 text-sm font-semibold text-white">
                   Recommended Action
                 </h3>
 
@@ -660,19 +873,179 @@ export default function WardDetailModal({
 
 
         {/* =============================================================== */}
-        {/* FOOTER                                                          */}
+        {/* CITIZEN PRECAUTIONS                                             */}
+        {/* =============================================================== */}
+
+        <section className="mt-7">
+
+          <div className="rounded-xl border border-emerald-400/10 bg-emerald-500/[0.05] p-5">
+
+            <div className="flex gap-3">
+
+              <div className="mt-0.5 shrink-0">
+
+                <ShieldCheck className="h-5 w-5 text-emerald-400" />
+
+              </div>
+
+
+              <div className="w-full">
+
+                <p className="text-[9px] font-bold uppercase tracking-[0.15em] text-emerald-400">
+                  Public Safety Guidance
+                </p>
+
+
+                <h3 className="mt-1 text-sm font-semibold text-white">
+                  Recommended Precautions
+                </h3>
+
+
+                <p className="mt-2 text-xs leading-5 text-slate-500">
+                  Safety precautions based on
+                  the current risk level and
+                  primary hazard in this ward.
+                </p>
+
+
+                <ul className="mt-4 space-y-3">
+
+                  {precautions.map(
+                    (
+                      precaution
+                    ) => (
+
+                    <li
+                      key={
+                        precaution
+                      }
+                      className="flex items-start gap-3 text-sm leading-relaxed text-slate-400"
+                    >
+
+                      <span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-400" />
+
+                      <span>
+                        {
+                          precaution
+                        }
+                      </span>
+
+                    </li>
+
+                  ))}
+
+                </ul>
+
+              </div>
+
+            </div>
+
+          </div>
+
+        </section>
+
+
+        {/* =============================================================== */}
+        {/* DATA SOURCES                                                    */}
+        {/* =============================================================== */}
+
+        {wardData && (
+
+          <section className="mt-7">
+
+            <div className="rounded-xl border border-white/5 bg-white/[0.02] p-4">
+
+              <h3 className="text-sm font-semibold text-white">
+                Data Sources
+              </h3>
+
+
+              <div className="mt-4 grid gap-3 sm:grid-cols-2">
+
+                <SourceRow
+                  label="Data Mode"
+                  value={
+                    wardData.dataMode ??
+                    "HYBRID"
+                  }
+                />
+
+
+                <SourceRow
+                  label="Rainfall Mode"
+                  value={
+                    wardData.sources
+                      ?.rainfallMode ??
+                    "Unknown"
+                  }
+                />
+
+
+                <SourceRow
+                  label="Rainfall Source"
+                  value={
+                    wardData.sources
+                      ?.rainfall ??
+                    "Unavailable"
+                  }
+                />
+
+
+                <SourceRow
+                  label="River Level Mode"
+                  value={
+                    wardData.sources
+                      ?.riverLevelMode ??
+                    "Unknown"
+                  }
+                />
+
+
+                <SourceRow
+                  label="River Level Source"
+                  value={
+                    wardData.sources
+                      ?.riverLevel ??
+                    "Unavailable"
+                  }
+                />
+
+
+                <SourceRow
+                  label="Citizen Evidence"
+                  value={
+                    wardData.sources
+                      ?.crowdReports ??
+                    "Unavailable"
+                  }
+                />
+
+              </div>
+
+            </div>
+
+          </section>
+
+        )}
+
+
+        {/* =============================================================== */}
+        {/* DISCLAIMER                                                      */}
         {/* =============================================================== */}
 
         <div className="mt-6 border-t border-white/5 pt-4">
 
           <p className="text-[11px] leading-relaxed text-slate-600">
+
             Risk and propagation forecasts are
             prototype decision-support estimates
-            generated from live rainfall,
-            river-level, verified citizen
-            evidence and geographic proximity.
-            They are not official evacuation
-            orders or hydrological forecasts.
+            generated from rainfall,
+            river-level readings, verified
+            citizen evidence and geographic
+            proximity. They are not official
+            evacuation orders or government
+            hydrological forecasts.
+
           </p>
 
         </div>
@@ -699,18 +1072,264 @@ function getFactorMaximum(
     case "Rainfall":
       return 40;
 
-
     case "River Level":
       return 40;
-
 
     case "Verified Reports":
       return 20;
 
-
     default:
       return 100;
   }
+}
+
+
+/* ========================================================================= */
+/* PRECAUTIONS                                                               */
+/* ========================================================================= */
+
+function getWardPrecautions(
+  level: RiskLevel,
+  hazard: string
+): string[] {
+
+  const hazardName =
+    hazard.toLowerCase();
+
+
+  const floodRelated =
+    hazardName.includes(
+      "flood"
+    ) ||
+    hazardName.includes(
+      "water"
+    ) ||
+    hazardName.includes(
+      "river"
+    );
+
+
+  if (
+    level ===
+    "CRITICAL"
+  ) {
+
+    if (
+      floodRelated
+    ) {
+
+      return [
+        "Move away from low-lying, waterlogged and flood-prone areas immediately if conditions are worsening.",
+        "Do not walk, drive or ride through flowing floodwater.",
+        "Follow evacuation instructions issued by authorized disaster-management personnel.",
+        "Keep medicines, drinking water, identification documents, chargers and emergency supplies ready.",
+        "Switch off electricity from the main supply if water starts entering the building and it is safe to do so.",
+        "Assist children, elderly people and persons with disabilities in reaching safer locations.",
+      ];
+
+    }
+
+
+    return [
+      "Follow official emergency instructions immediately.",
+      "Avoid unnecessary outdoor movement until conditions improve.",
+      "Keep emergency contacts and essential supplies accessible.",
+      "Monitor official PRAVAAH alerts continuously.",
+      "Assist vulnerable family members and neighbours where safe.",
+    ];
+  }
+
+
+  if (
+    level ===
+    "HIGH"
+  ) {
+
+    if (
+      floodRelated
+    ) {
+
+      return [
+        "Avoid unnecessary travel through flood-prone, low-lying or poorly drained roads.",
+        "Monitor rainfall, river-level conditions and official alerts frequently.",
+        "Move important documents, electronics and valuables above expected water level.",
+        "Keep phones charged and emergency supplies accessible.",
+        "Avoid standing near drains, canals, riverbanks or fast-moving water.",
+        "Report rapidly worsening local flooding through PRAVAAH.",
+      ];
+
+    }
+
+
+    return [
+      "Closely monitor official alerts and changing local conditions.",
+      "Reduce unnecessary travel in affected areas.",
+      "Keep phones charged and emergency supplies accessible.",
+      "Prepare a safe route in case authorities advise evacuation.",
+      "Report worsening conditions through PRAVAAH.",
+    ];
+  }
+
+
+  if (
+    level ===
+    "WATCH"
+  ) {
+
+    if (
+      floodRelated
+    ) {
+
+      return [
+        "Monitor rainfall and river-level information regularly.",
+        "Avoid known waterlogging locations during periods of heavy rainfall.",
+        "Keep important documents and essential supplies ready.",
+        "Check drainage conditions around your home or workplace where it is safe.",
+        "Plan an alternate route that avoids low-lying roads.",
+        "Report unusual water accumulation or rapidly rising water through PRAVAAH.",
+      ];
+
+    }
+
+
+    return [
+      "Monitor local conditions and official alerts regularly.",
+      "Remain prepared for possible deterioration.",
+      "Keep emergency contact information available.",
+      "Report unusual or worsening conditions.",
+      "Avoid unnecessary exposure to identified hazard areas.",
+    ];
+  }
+
+
+  return [
+    "Continue monitoring local weather and official alerts.",
+    "Keep emergency contact numbers easily accessible.",
+    "Avoid unsafe water crossings and heavily waterlogged roads.",
+    "Keep drains and nearby water outlets clear where it is safe to do so.",
+    "Report unusual flooding or hazardous conditions through PRAVAAH.",
+  ];
+}
+
+
+/* ========================================================================= */
+/* DETAIL METRIC                                                             */
+/* ========================================================================= */
+
+function DetailMetric({
+  icon: Icon,
+  label,
+  value,
+}: {
+  icon:
+    typeof MapPin;
+
+  label:
+    string;
+
+  value:
+    string;
+}) {
+
+  return (
+
+    <div className="rounded-xl border border-white/5 bg-white/[0.03] p-4">
+
+      <Icon className="h-4 w-4 text-blue-400" />
+
+
+      <p className="mt-3 text-[9px] uppercase tracking-wider text-slate-600">
+        {
+          label
+        }
+      </p>
+
+
+      <p className="mt-1 break-words text-sm font-semibold text-slate-200">
+        {
+          value
+        }
+      </p>
+
+    </div>
+
+  );
+}
+
+
+/* ========================================================================= */
+/* EVIDENCE METRIC                                                           */
+/* ========================================================================= */
+
+function EvidenceMetric({
+  label,
+  value,
+}: {
+  label:
+    string;
+
+  value:
+    number;
+}) {
+
+  return (
+
+    <div className="rounded-xl border border-white/5 bg-white/[0.02] px-4 py-3">
+
+      <p className="text-[9px] uppercase tracking-wider text-slate-600">
+        {
+          label
+        }
+      </p>
+
+
+      <p className="mt-1 text-sm font-semibold text-slate-300">
+        {
+          value
+        }
+      </p>
+
+    </div>
+
+  );
+}
+
+
+/* ========================================================================= */
+/* SOURCE ROW                                                                */
+/* ========================================================================= */
+
+function SourceRow({
+  label,
+  value,
+}: {
+  label:
+    string;
+
+  value:
+    string;
+}) {
+
+  return (
+
+    <div className="rounded-lg bg-white/[0.025] px-3 py-3">
+
+      <p className="text-[9px] uppercase tracking-wider text-slate-600">
+        {
+          label
+        }
+      </p>
+
+
+      <p className="mt-1 text-xs leading-5 text-slate-300">
+        {
+          value
+        }
+      </p>
+
+    </div>
+
+  );
 }
 
 
@@ -734,11 +1353,13 @@ function MiniMetric({
 }) {
 
   return (
+
     <div className="rounded-lg bg-white/[0.03] px-3 py-2">
 
       <div className="flex items-center gap-1 text-slate-600">
 
         <Icon className="h-3 w-3" />
+
 
         <span className="text-[9px] uppercase tracking-wider">
           {
@@ -756,5 +1377,6 @@ function MiniMetric({
       </p>
 
     </div>
+
   );
 }
