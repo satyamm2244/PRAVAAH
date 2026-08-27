@@ -58,29 +58,42 @@ import type {
 
 type BackendWard = {
   ward: string;
+
   rainfallMm: number;
+
   riverLevelCm: number;
+
   reportCount: number;
 
   verifiedReportCount?: number;
+
   pendingReportCount?: number;
+
   rejectedReportCount?: number;
+
   totalReportCount?: number;
 
   latitude: number;
+
   longitude: number;
 
   dataMode?: string;
+
   timestamp?: number;
 
   sources?: {
     rainfall?: string;
+
     rainfallMode?: string;
 
     riverLevel?: string;
+
     riverLevelMode?: string;
 
+    riverLevelTimestamp?: number | null;
+
     crowdReports?: string;
+
     crowdReportsMode?: string;
   };
 };
@@ -88,12 +101,16 @@ type BackendWard = {
 
 type SystemStatusResponse = {
   status: string;
+
   dataMode: string;
 
   reports?: {
     total?: number;
+
     pending?: number;
+
     verified?: number;
+
     rejected?: number;
   };
 
@@ -110,7 +127,8 @@ type OverviewCardProps = {
 
   subtitle: string;
 
-  icon: LucideIcon;
+  icon:
+    LucideIcon;
 
   tone:
     | "blue"
@@ -127,6 +145,7 @@ type OverviewCardProps = {
 const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_URL ||
   "http://127.0.0.1:8000";
+
 
 const REFRESH_INTERVAL =
   4000;
@@ -201,9 +220,10 @@ export default function Home() {
     );
 
 
-  /* ========================================================================= */
-  /* WARD DETAIL MODAL                                                         */
-  /* ========================================================================= */
+  /*
+   * Selected ward remains selected
+   * while its modal is open.
+   */
 
   const [
     selectedWard,
@@ -330,9 +350,13 @@ export default function Home() {
 
 
           /*
-           * Keep an already selected ward synchronized
-           * with the latest 4-second refresh.
+           * Keep selected ward live.
+           *
+           * If live data changes while the modal
+           * is open, replace the old risk object
+           * with the newest version.
            */
+
           setSelectedWard(
             (
               current
@@ -341,9 +365,7 @@ export default function Home() {
               if (
                 !current
               ) {
-
                 return null;
-
               }
 
 
@@ -642,7 +664,7 @@ export default function Home() {
 
 
   /* ========================================================================= */
-  /* WARD COORDINATES                                                         */
+  /* WARD COORDINATES                                                          */
   /* ========================================================================= */
 
   const coordinates =
@@ -671,7 +693,43 @@ export default function Home() {
 
 
   /* ========================================================================= */
-  /* PROPAGATION FORECAST                                                     */
+  /* SELECTED BACKEND WARD                                                     */
+  /* ========================================================================= */
+
+  const selectedWardData =
+    useMemo(
+      () => {
+
+        if (
+          !selectedWard
+        ) {
+
+          return null;
+
+        }
+
+
+        return (
+          backendWards.find(
+            (
+              ward
+            ) =>
+              ward.ward ===
+              selectedWard.ward
+          ) ??
+          null
+        );
+
+      },
+      [
+        selectedWard,
+        backendWards,
+      ]
+    );
+
+
+  /* ========================================================================= */
+  /* PROPAGATION                                                               */
   /* ========================================================================= */
 
   const propagation:
@@ -706,7 +764,7 @@ export default function Home() {
 
 
   /* ========================================================================= */
-  /* WARD SELECTION                                                           */
+  /* WARD MODAL                                                                */
   /* ========================================================================= */
 
   const handleWardSelect =
@@ -759,7 +817,7 @@ export default function Home() {
 
 
   /* ========================================================================= */
-  /* RISK DISTRIBUTION                                                        */
+  /* RISK DISTRIBUTION                                                         */
   /* ========================================================================= */
 
   const totalWards =
@@ -886,8 +944,6 @@ export default function Home() {
 
             <div className="relative grid min-h-[570px] gap-8 p-6 md:p-8 xl:grid-cols-[1.15fr_0.85fr] xl:p-10">
 
-              {/* LEFT */}
-
               <div className="flex flex-col justify-center py-4 xl:py-8">
 
                 <div className="mb-5 flex w-fit items-center gap-2 rounded-full border border-blue-400/20 bg-[#07111f]/65 px-3 py-1.5 backdrop-blur-md">
@@ -920,9 +976,11 @@ export default function Home() {
                     Predict.
                   </span>
 
+
                   <span className="block text-blue-400">
                     Prepare.
                   </span>
+
 
                   <span className="block text-emerald-400">
                     Protect.
@@ -1000,8 +1058,6 @@ export default function Home() {
               </div>
 
 
-              {/* RIGHT STATUS */}
-
               <div className="flex items-center justify-center xl:justify-end">
 
                 <div className="w-full max-w-[470px] rounded-2xl border border-blue-400/20 bg-[#07111f]/82 p-5 shadow-[0_24px_80px_rgba(0,0,0,0.4)] backdrop-blur-xl">
@@ -1059,7 +1115,9 @@ export default function Home() {
                   <div className="mt-6 grid grid-cols-3 divide-x divide-white/10">
 
                     <StatusMetric
-                      icon={CloudRain}
+                      icon={
+                        CloudRain
+                      }
                       value={`${averageRainfall}`}
                       unit="mm"
                       label="Avg. Rainfall"
@@ -1068,7 +1126,9 @@ export default function Home() {
 
 
                     <StatusMetric
-                      icon={Waves}
+                      icon={
+                        Waves
+                      }
                       value={`${averageRiverLevel}`}
                       unit="cm"
                       label="River Level"
@@ -1077,7 +1137,9 @@ export default function Home() {
 
 
                     <StatusMetric
-                      icon={AlertTriangle}
+                      icon={
+                        AlertTriangle
+                      }
                       value={`${atRiskCount}`}
                       unit=""
                       label="At Risk"
@@ -1096,7 +1158,7 @@ export default function Home() {
                           highestRiskWard
                         )
                       }
-                      className="mt-6 w-full rounded-xl border border-white/5 bg-white/[0.035] p-4 text-left transition hover:border-blue-400/20 hover:bg-white/[0.06]"
+                      className="mt-6 w-full rounded-xl border border-white/5 bg-white/[0.035] p-4 text-left transition hover:border-blue-500/20 hover:bg-white/[0.06]"
                     >
 
                       <div className="flex items-center justify-between gap-4">
@@ -1109,15 +1171,21 @@ export default function Home() {
 
 
                           <p className="mt-1 text-lg font-bold text-white">
-                            {highestRiskWard.ward}
+                            {
+                              highestRiskWard.ward
+                            }
                           </p>
 
 
                           <p className="mt-1 text-[10px] text-slate-500">
 
-                            {highestRiskWard.level}
-                            {" • "}
-                            {highestRiskWard.primaryHazard}
+                            {
+                              highestRiskWard.level
+                            }{" "}
+                            •{" "}
+                            {
+                              highestRiskWard.primaryHazard
+                            }
 
                           </p>
 
@@ -1127,8 +1195,11 @@ export default function Home() {
                         <div className="text-right">
 
                           <p className="text-2xl font-black text-red-400">
-                            {highestRiskWard.risk}
+                            {
+                              highestRiskWard.risk
+                            }
                           </p>
+
 
                           <p className="text-[10px] text-slate-500">
                             /100
@@ -1169,6 +1240,7 @@ export default function Home() {
 
                       <span className="h-2 w-2 rounded-full bg-emerald-400" />
 
+
                       <span className="text-xs text-slate-400">
                         Live Monitoring
                       </span>
@@ -1202,6 +1274,7 @@ export default function Home() {
                     Live Overview
                   </h2>
 
+
                   <p className="mt-1 text-xs text-slate-500">
                     Current operational picture across monitored wards.
                   </p>
@@ -1222,31 +1295,44 @@ export default function Home() {
 
                 <OverviewCard
                   title="Total Wards"
-                  value={totalWards}
+                  value={
+                    totalWards
+                  }
                   subtitle="Bhubaneswar monitored"
-                  icon={Building2}
+                  icon={
+                    Building2
+                  }
                   tone="blue"
                 />
 
 
                 <OverviewCard
                   title="At Risk Wards"
-                  value={atRiskCount}
+                  value={
+                    atRiskCount
+                  }
                   subtitle={
-                    atRiskCount === 0
+                    atRiskCount ===
+                    0
                       ? "No elevated risk"
                       : "Require monitoring"
                   }
-                  icon={AlertTriangle}
+                  icon={
+                    AlertTriangle
+                  }
                   tone="red"
                 />
 
 
                 <OverviewCard
                   title="Verified Reports"
-                  value={verifiedReports}
+                  value={
+                    verifiedReports
+                  }
                   subtitle="Ground evidence confirmed"
-                  icon={FileCheck2}
+                  icon={
+                    FileCheck2
+                  }
                   tone="purple"
                 />
 
@@ -1254,9 +1340,11 @@ export default function Home() {
                 <OverviewCard
                   title="Emergency Status"
                   value={
-                    criticalCount > 0
+                    criticalCount >
+                    0
                       ? "Critical"
-                      : highCount > 0
+                      : highCount >
+                          0
                         ? "Elevated"
                         : "Normal"
                   }
@@ -1265,14 +1353,18 @@ export default function Home() {
                       ? "Monitoring active"
                       : "Backend degraded"
                   }
-                  icon={ShieldCheck}
+                  icon={
+                    ShieldCheck
+                  }
                   tone="green"
                 />
 
               </div>
 
 
-              {/* HIGHEST RISK WARDS */}
+              {/* =========================================================== */}
+              {/* HIGHEST RISK WARDS                                          */}
+              {/* =========================================================== */}
 
               <div className="mt-6 rounded-2xl border border-white/10 bg-[#0a1728] p-5 sm:p-6">
 
@@ -1284,9 +1376,11 @@ export default function Home() {
                       Risk Intelligence
                     </p>
 
+
                     <h2 className="mt-1 text-lg font-bold text-white">
                       Highest-Risk Wards
                     </h2>
+
 
                     <p className="mt-1 text-xs text-slate-500">
                       Click any ward to inspect its risk intelligence and recommended response.
@@ -1312,7 +1406,8 @@ export default function Home() {
                 <div className="mt-6 space-y-3">
 
                   {
-                    topRiskWards.length > 0
+                    topRiskWards.length >
+                    0
                       ? topRiskWards.map(
                           (
                             ward,
@@ -1320,9 +1415,16 @@ export default function Home() {
                           ) => (
 
                             <TopRiskWardRow
-                              key={ward.ward}
-                              ward={ward}
-                              rank={index + 1}
+                              key={
+                                ward.ward
+                              }
+                              ward={
+                                ward
+                              }
+                              rank={
+                                index +
+                                1
+                              }
                               onClick={() =>
                                 handleWardSelect(
                                   ward
@@ -1351,7 +1453,9 @@ export default function Home() {
 
 
               <Link
-                href={alertsHref}
+                href={
+                  alertsHref
+                }
                 className="group mt-6 flex items-center justify-between rounded-2xl border border-blue-500/15 bg-gradient-to-r from-blue-500/10 to-transparent p-5 transition hover:border-blue-500/30"
               >
 
@@ -1393,7 +1497,9 @@ export default function Home() {
             </div>
 
 
-            {/* RIGHT COLUMN */}
+            {/* ============================================================= */}
+            {/* RIGHT COLUMN                                                  */}
+            {/* ============================================================= */}
 
             <div className="space-y-6">
 
@@ -1402,6 +1508,7 @@ export default function Home() {
                 <h2 className="font-semibold">
                   Risk Distribution
                 </h2>
+
 
                 <p className="mt-1 text-xs text-slate-500">
                   Current ward risk classification
@@ -1421,8 +1528,11 @@ export default function Home() {
                     <div className="flex h-28 w-28 flex-col items-center justify-center rounded-full bg-[#0a1728] shadow-inner">
 
                       <p className="text-3xl font-bold">
-                        {totalWards}
+                        {
+                          totalWards
+                        }
                       </p>
+
 
                       <p className="text-[10px] uppercase tracking-wider text-slate-500">
                         Wards
@@ -1437,29 +1547,48 @@ export default function Home() {
 
                     <RiskLegendRow
                       label="Critical"
-                      count={criticalCount}
-                      percentage={criticalPercentage}
+                      count={
+                        criticalCount
+                      }
+                      percentage={
+                        criticalPercentage
+                      }
                       dotClass="bg-red-500"
                     />
 
+
                     <RiskLegendRow
                       label="High"
-                      count={highCount}
-                      percentage={highPercentage}
+                      count={
+                        highCount
+                      }
+                      percentage={
+                        highPercentage
+                      }
                       dotClass="bg-orange-500"
                     />
 
+
                     <RiskLegendRow
                       label="Watch"
-                      count={watchCount}
-                      percentage={watchPercentage}
+                      count={
+                        watchCount
+                      }
+                      percentage={
+                        watchPercentage
+                      }
                       dotClass="bg-yellow-400"
                     />
 
+
                     <RiskLegendRow
                       label="Normal"
-                      count={normalCount}
-                      percentage={normalPercentage}
+                      count={
+                        normalCount
+                      }
+                      percentage={
+                        normalPercentage
+                      }
                       dotClass="bg-emerald-400"
                     />
 
@@ -1487,6 +1616,7 @@ export default function Home() {
                       Monitoring Area
                     </p>
 
+
                     <p className="font-semibold">
                       Bhubaneswar
                     </p>
@@ -1505,7 +1635,9 @@ export default function Home() {
 
                   <p className="mt-2 text-2xl font-bold text-white">
 
-                    {totalWards}{" "}
+                    {
+                      totalWards
+                    }{" "}
 
                     <span className="text-sm font-normal text-slate-500">
                       wards
@@ -1517,6 +1649,7 @@ export default function Home() {
                   <div className="mt-3 flex items-center gap-2">
 
                     <CheckCircle2 className="h-4 w-4 text-emerald-400" />
+
 
                     <p className="text-xs text-slate-500">
                       Odisha, India
@@ -1537,20 +1670,32 @@ export default function Home() {
       </div>
 
 
-      {/* ================================================================ */}
-      {/* WARD DETAIL MODAL                                                */}
-      {/* ================================================================ */}
+      {/* =================================================================== */}
+      {/* WARD DETAIL MODAL                                                   */}
+      {/* =================================================================== */}
 
       {selectedWard &&
         modalOpen && (
 
-          <WardDetailModal
-            wardRisk={selectedWard}
-            propagation={propagation}
-            onClose={handleCloseWardModal}
-          />
+        <WardDetailModal
+          wardRisk={
+            selectedWard
+          }
 
-        )}
+          wardData={
+            selectedWardData
+          }
+
+          propagation={
+            propagation
+          }
+
+          onClose={
+            handleCloseWardModal
+          }
+        />
+
+      )}
 
     </main>
 
@@ -1569,11 +1714,20 @@ function StatusMetric({
   label,
   iconClass,
 }: {
-  icon: LucideIcon;
-  value: string;
-  unit: string;
-  label: string;
-  iconClass: string;
+  icon:
+    LucideIcon;
+
+  value:
+    string;
+
+  unit:
+    string;
+
+  label:
+    string;
+
+  iconClass:
+    string;
 }) {
 
   return (
@@ -1587,12 +1741,17 @@ function StatusMetric({
 
       <p className="mt-3 text-xl font-bold text-white">
 
-        {value}
+        {
+          value
+        }
+
 
         {unit && (
 
           <span className="ml-1 text-xs font-normal text-slate-500">
-            {unit}
+            {
+              unit
+            }
           </span>
 
         )}
@@ -1601,7 +1760,9 @@ function StatusMetric({
 
 
       <p className="mt-1 text-[9px] text-slate-500">
-        {label}
+        {
+          label
+        }
       </p>
 
     </div>
@@ -1688,17 +1849,23 @@ function OverviewCard({
 
 
       <p className="mt-5 text-xs text-slate-500">
-        {title}
+        {
+          title
+        }
       </p>
 
 
       <p className="mt-1 text-2xl font-bold text-white">
-        {value}
+        {
+          value
+        }
       </p>
 
 
       <p className="mt-2 text-[10px] text-slate-600">
-        {subtitle}
+        {
+          subtitle
+        }
       </p>
 
     </article>
@@ -1716,9 +1883,14 @@ function TopRiskWardRow({
   rank,
   onClick,
 }: {
-  ward: WardRisk;
-  rank: number;
-  onClick: () => void;
+  ward:
+    WardRisk;
+
+  rank:
+    number;
+
+  onClick:
+    () => void;
 }) {
 
   const styles:
@@ -1798,14 +1970,18 @@ function TopRiskWardRow({
 
     <button
       type="button"
-      onClick={onClick}
-      className="w-full cursor-pointer rounded-xl border border-white/5 bg-[#07111f] p-4 text-left transition hover:border-blue-400/30 hover:bg-[#091626] focus:outline-none focus:ring-2 focus:ring-blue-500/30"
+      onClick={
+        onClick
+      }
+      className="w-full rounded-xl border border-white/5 bg-[#07111f] p-4 text-left transition hover:border-blue-500/25 hover:bg-[#091626]"
     >
 
       <div className="flex items-center gap-4">
 
         <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-white/[0.04] text-xs font-bold text-slate-400">
-          {rank}
+          {
+            rank
+          }
         </div>
 
 
@@ -1814,21 +1990,27 @@ function TopRiskWardRow({
           <div className="flex flex-wrap items-center gap-2">
 
             <p className="font-semibold text-white">
-              {ward.ward}
+              {
+                ward.ward
+              }
             </p>
 
 
             <span
               className={`rounded-full px-2 py-0.5 text-[9px] font-bold tracking-wider ring-1 ${style.badge} ${style.text}`}
             >
-              {ward.level}
+              {
+                ward.level
+              }
             </span>
 
           </div>
 
 
           <p className="mt-1 truncate text-xs text-slate-500">
-            {ward.primaryHazard}
+            {
+              ward.primaryHazard
+            }
           </p>
 
 
@@ -1852,7 +2034,9 @@ function TopRiskWardRow({
           <p
             className={`text-xl font-black ${style.text}`}
           >
-            {ward.risk}
+            {
+              ward.risk
+            }
           </p>
 
 
@@ -1880,10 +2064,17 @@ function RiskLegendRow({
   percentage,
   dotClass,
 }: {
-  label: string;
-  count: number;
-  percentage: number;
-  dotClass: string;
+  label:
+    string;
+
+  count:
+    number;
+
+  percentage:
+    number;
+
+  dotClass:
+    string;
 }) {
 
   return (
@@ -1898,7 +2089,9 @@ function RiskLegendRow({
 
 
         <span className="text-xs text-slate-400">
-          {label}
+          {
+            label
+          }
         </span>
 
       </div>
@@ -1907,12 +2100,20 @@ function RiskLegendRow({
       <div className="text-xs">
 
         <span className="font-medium text-slate-200">
-          {count}
+          {
+            count
+          }
         </span>
 
 
         <span className="ml-1 text-slate-600">
-          ({percentage}%)
+
+          (
+          {
+            percentage
+          }
+          %)
+
         </span>
 
       </div>
@@ -1949,5 +2150,4 @@ function percentage(
     ) *
     100
   );
-
 }

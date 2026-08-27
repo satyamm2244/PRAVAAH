@@ -65,14 +65,17 @@ type BackendWard = {
 
   sources?: {
     rainfall?: string;
+
     rainfallMode?: string;
 
     riverLevel?: string;
+
     riverLevelMode?: string;
 
     riverLevelTimestamp?: number | null;
 
     crowdReports?: string;
+
     crowdReportsMode?: string;
   };
 
@@ -87,6 +90,7 @@ type BackendWard = {
 const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_URL ||
   "http://127.0.0.1:8000";
+
 
 const REFRESH_INTERVAL =
   4000;
@@ -106,47 +110,36 @@ export default function RiskMapPage() {
     wardRisks,
     setWardRisks,
   ] =
-    useState<
-      WardRisk[]
-    >([]);
+    useState<WardRisk[]>(
+      []
+    );
 
 
   const [
     backendWards,
     setBackendWards,
   ] =
-    useState<
-      BackendWard[]
-    >([]);
+    useState<BackendWard[]>(
+      []
+    );
 
 
   /*
-   * selectedWard controls the MAP selection.
+   * selectedWard controls the map selection.
    *
-   * Important:
-   * Closing the modal does NOT clear this.
-   *
-   * This allows:
-   *
-   * - propagation forecasting
-   * - safer ward recommendation
-   * - evacuation routing
-   *
-   * to remain active after the modal closes.
+   * Closing the modal intentionally does not
+   * clear this value because propagation
+   * forecasting can continue using it.
    */
 
   const [
     selectedWard,
     setSelectedWard,
   ] =
-    useState<
-      WardRisk | null
-    >(null);
+    useState<WardRisk | null>(
+      null
+    );
 
-
-  /*
-   * modalOpen controls ONLY the ward detail modal.
-   */
 
   const [
     modalOpen,
@@ -179,9 +172,9 @@ export default function RiskMapPage() {
     error,
     setError,
   ] =
-    useState<
-      string | null
-    >(null);
+    useState<string | null>(
+      null
+    );
 
 
   /* ========================================================================= */
@@ -234,7 +227,7 @@ export default function RiskMapPage() {
 
 
           /* ---------------------------------------------------------------- */
-          /* STORE BACKEND COORDINATES                                        */
+          /* STORE FULL BACKEND WARD DATA                                     */
           /* ---------------------------------------------------------------- */
 
           setBackendWards(
@@ -254,7 +247,7 @@ export default function RiskMapPage() {
               ) => ({
 
                 ward:
-                  ward.ward,
+                  ward.ward as WardReading["ward"],
 
                 rainfallMm:
                   ward.rainfallMm,
@@ -270,7 +263,7 @@ export default function RiskMapPage() {
 
 
           /* ---------------------------------------------------------------- */
-          /* CALCULATE WARD RISKS                                             */
+          /* CALCULATE RISKS                                                  */
           /* ---------------------------------------------------------------- */
 
           const risks =
@@ -285,19 +278,8 @@ export default function RiskMapPage() {
 
 
           /* ---------------------------------------------------------------- */
-          /* KEEP SELECTED WARD LIVE                                          */
+          /* KEEP CURRENT SELECTION LIVE                                      */
           /* ---------------------------------------------------------------- */
-
-          /*
-           * Risk data refreshes every four seconds.
-           *
-           * If W15 is currently selected, we replace
-           * the old W15 object with the newest W15
-           * risk object.
-           *
-           * This means routing and propagation continue
-           * using current data.
-           */
 
           setSelectedWard(
             (
@@ -405,9 +387,7 @@ export default function RiskMapPage() {
   /* ========================================================================= */
 
   const coordinates =
-    useMemo<
-      WardCoordinate[]
-    >(
+    useMemo<WardCoordinate[]>(
       () =>
         backendWards.map(
           (
@@ -426,6 +406,42 @@ export default function RiskMapPage() {
           })
         ),
       [
+        backendWards,
+      ]
+    );
+
+
+  /* ========================================================================= */
+  /* SELECTED BACKEND WARD                                                     */
+  /* ========================================================================= */
+
+  const selectedWardData =
+    useMemo(
+      () => {
+
+        if (
+          !selectedWard
+        ) {
+
+          return null;
+
+        }
+
+
+        return (
+          backendWards.find(
+            (
+              ward
+            ) =>
+              ward.ward ===
+              selectedWard.ward
+          ) ??
+          null
+        );
+
+      },
+      [
+        selectedWard,
         backendWards,
       ]
     );
@@ -470,17 +486,11 @@ export default function RiskMapPage() {
   /* MARKER SELECTION                                                          */
   /* ========================================================================= */
 
-  /*
-   * Clicking a marker performs TWO separate jobs:
-   *
-   * 1. Select ward on map
-   * 2. Open detail modal
-   */
-
   const handleWardSelect =
     useCallback(
       (
-        wardRisk: WardRisk
+        wardRisk:
+          WardRisk
       ) => {
 
         setSelectedWard(
@@ -500,19 +510,6 @@ export default function RiskMapPage() {
   /* ========================================================================= */
   /* CLOSE MODAL                                                               */
   /* ========================================================================= */
-
-  /*
-   * Important:
-   *
-   * We intentionally DO NOT:
-   *
-   * setSelectedWard(null)
-   *
-   * here.
-   *
-   * Otherwise evacuation routing and
-   * propagation would disappear.
-   */
 
   const handleCloseModal =
     useCallback(
@@ -535,28 +532,15 @@ export default function RiskMapPage() {
 
     <main className="min-h-screen bg-[#07111f] text-white">
 
-      {/* =================================================================== */}
-      {/* HEADER                                                              */}
-      {/* =================================================================== */}
-
       <Header />
 
 
       <div className="mx-auto grid max-w-[1600px] grid-cols-1 lg:grid-cols-[230px_1fr]">
 
-        {/* ================================================================= */}
-        {/* SIDEBAR                                                           */}
-        {/* ================================================================= */}
-
         <Sidebar />
 
 
-        {/* ================================================================= */}
-        {/* MAIN CONTENT                                                      */}
-        {/* ================================================================= */}
-
         <section className="min-w-0 p-5 lg:p-8">
-
 
           {/* =============================================================== */}
           {/* PAGE HEADER                                                     */}
@@ -584,16 +568,12 @@ export default function RiskMapPage() {
 
             <div className="flex flex-wrap items-center gap-3">
 
-
-              {/* =========================================================== */}
-              {/* LIVE STATUS                                                 */}
-              {/* =========================================================== */}
-
               <div className="flex items-center gap-2 rounded-lg border border-white/10 bg-white/5 px-4 py-2.5 text-xs text-slate-400">
 
                 <span className="relative flex h-2 w-2">
 
                   <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
+
 
                   <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-400" />
 
@@ -605,23 +585,16 @@ export default function RiskMapPage() {
               </div>
 
 
-              {/* =========================================================== */}
-              {/* MANUAL REFRESH                                              */}
-              {/* =========================================================== */}
-
               <button
                 type="button"
-
                 onClick={() =>
                   fetchWardRisks(
                     true
                   )
                 }
-
                 disabled={
                   refreshing
                 }
-
                 className="flex items-center gap-2 rounded-lg border border-white/10 bg-white/5 px-4 py-2.5 text-sm text-slate-300 transition hover:bg-white/10 disabled:opacity-50"
               >
 
@@ -662,11 +635,9 @@ export default function RiskMapPage() {
 
 
                 <p className="mt-1 text-xs text-red-300/70">
-
                   {
                     error
                   }
-
                 </p>
 
               </div>
@@ -725,23 +696,19 @@ export default function RiskMapPage() {
 
 
           {/* =============================================================== */}
-          {/* MAP DESCRIPTION                                                 */}
+          {/* DESCRIPTION                                                     */}
           {/* =============================================================== */}
 
           <div className="mt-4 flex flex-wrap items-center justify-between gap-3 text-[11px] text-slate-600">
 
             <p>
-
-              Click a ward marker to inspect risk evidence and recommended
-              response.
-
+              Click a ward marker to inspect live conditions,
+              risk evidence, propagation and recommended response.
             </p>
 
 
             <p>
-
               Prototype risk thresholds are for decision-support demonstration.
-
             </p>
 
           </div>
@@ -761,6 +728,10 @@ export default function RiskMapPage() {
         <WardDetailModal
           wardRisk={
             selectedWard
+          }
+
+          wardData={
+            selectedWardData
           }
 
           propagation={
@@ -796,9 +767,7 @@ function MapLoadingState() {
 
 
         <p className="mt-3 text-sm text-slate-400">
-
           Loading live risk map...
-
         </p>
 
       </div>
@@ -825,16 +794,12 @@ function MapEmptyState() {
 
 
         <p className="mt-3 text-sm font-medium text-slate-300">
-
           No ward risk data available
-
         </p>
 
 
         <p className="mt-1 text-xs text-slate-600">
-
           Check the backend connection.
-
         </p>
 
       </div>
