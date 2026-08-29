@@ -2,83 +2,212 @@
 
 import {
   createContext,
+  useCallback,
   useContext,
   useEffect,
+  useMemo,
   useState,
 } from "react";
 
+
 type MobileSidebarContextType = {
-  mobileSidebarOpen: boolean;
-  openMobileSidebar: () => void;
-  closeMobileSidebar: () => void;
+  mobileSidebarOpen:
+    boolean;
+
+  openMobileSidebar:
+    () => void;
+
+  closeMobileSidebar:
+    () => void;
+
+  toggleMobileSidebar:
+    () => void;
 };
+
 
 const MobileSidebarContext =
   createContext<MobileSidebarContextType | null>(
     null
   );
 
+
+/* ========================================================================= */
+/* PROVIDER                                                                  */
+/* ========================================================================= */
+
 export function MobileSidebarProvider({
   children,
 }: {
-  children: React.ReactNode;
+  children:
+    React.ReactNode;
 }) {
+
   const [
     mobileSidebarOpen,
     setMobileSidebarOpen,
-  ] = useState(false);
+  ] =
+    useState(
+      false
+    );
 
-  function openMobileSidebar() {
-    setMobileSidebarOpen(true);
-  }
 
-  function closeMobileSidebar() {
-    setMobileSidebarOpen(false);
-  }
+  /* ========================================================================= */
+  /* OPEN                                                                      */
+  /* ========================================================================= */
 
-  /*
-   * Prevent the page behind the drawer
-   * from scrolling while mobile menu is open.
-   */
-  useEffect(() => {
-    if (mobileSidebarOpen) {
-      document.body.style.overflow =
-        "hidden";
-    } else {
-      document.body.style.overflow =
-        "";
-    }
+  const openMobileSidebar =
+    useCallback(
+      () => {
 
-    return () => {
-      document.body.style.overflow =
-        "";
-    };
-  }, [mobileSidebarOpen]);
+        setMobileSidebarOpen(
+          true
+        );
 
-  return (
-    <MobileSidebarContext.Provider
-      value={{
+      },
+      []
+    );
+
+
+  /* ========================================================================= */
+  /* CLOSE                                                                     */
+  /* ========================================================================= */
+
+  const closeMobileSidebar =
+    useCallback(
+      () => {
+
+        setMobileSidebarOpen(
+          false
+        );
+
+      },
+      []
+    );
+
+
+  /* ========================================================================= */
+  /* TOGGLE                                                                    */
+  /* ========================================================================= */
+
+  const toggleMobileSidebar =
+    useCallback(
+      () => {
+
+        setMobileSidebarOpen(
+          (
+            current
+          ) =>
+            !current
+        );
+
+      },
+      []
+    );
+
+
+  /* ========================================================================= */
+  /* PREVENT BACKGROUND SCROLL                                                 */
+  /* ========================================================================= */
+
+  useEffect(
+    () => {
+
+      if (
+        mobileSidebarOpen
+      ) {
+
+        document.body.style.overflow =
+          "hidden";
+
+      } else {
+
+        document.body.style.overflow =
+          "";
+
+      }
+
+
+      return () => {
+
+        document.body.style.overflow =
+          "";
+
+      };
+
+    },
+    [
+      mobileSidebarOpen,
+    ]
+  );
+
+
+  /* ========================================================================= */
+  /* CONTEXT VALUE                                                             */
+  /* ========================================================================= */
+
+  const value =
+    useMemo(
+      () => ({
         mobileSidebarOpen,
         openMobileSidebar,
         closeMobileSidebar,
-      }}
+        toggleMobileSidebar,
+      }),
+      [
+        mobileSidebarOpen,
+        openMobileSidebar,
+        closeMobileSidebar,
+        toggleMobileSidebar,
+      ]
+    );
+
+
+  /* ========================================================================= */
+  /* UI                                                                        */
+  /* ========================================================================= */
+
+  return (
+
+    <MobileSidebarContext.Provider
+      value={
+        value
+      }
     >
-      {children}
+
+      {
+        children
+      }
+
     </MobileSidebarContext.Provider>
+
   );
+
 }
 
+
+/* ========================================================================= */
+/* HOOK                                                                      */
+/* ========================================================================= */
+
 export function useMobileSidebar() {
+
   const context =
     useContext(
       MobileSidebarContext
     );
 
-  if (!context) {
+
+  if (
+    !context
+  ) {
+
     throw new Error(
       "useMobileSidebar must be used inside MobileSidebarProvider."
     );
+
   }
 
+
   return context;
+
 }
