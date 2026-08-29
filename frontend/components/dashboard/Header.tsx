@@ -17,6 +17,7 @@ import {
   CircleAlert,
   FileText,
   Info,
+  Menu,
   ShieldAlert,
   X,
 } from "lucide-react";
@@ -29,14 +30,23 @@ import {
   type AuthUser,
 } from "@/lib/auth";
 
+import {
+  useMobileSidebar,
+} from "@/components/dashboard/MobileSidebarProvider";
+
 
 const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_URL ||
   "http://127.0.0.1:8000";
 
+
 const NOTIFICATION_REFRESH_INTERVAL =
   4000;
 
+
+/* ========================================================================= */
+/* TYPES                                                                     */
+/* ========================================================================= */
 
 type NotificationType =
   | "REPORT"
@@ -44,6 +54,7 @@ type NotificationType =
   | "RISK"
   | "SENSOR"
   | "SYSTEM";
+
 
 type NotificationSeverity =
   | "INFO"
@@ -53,6 +64,7 @@ type NotificationSeverity =
   | "HIGH"
   | "CRITICAL"
   | "SUCCESS";
+
 
 type NotificationItem = {
   id: string;
@@ -97,7 +109,17 @@ type NotificationItem = {
 };
 
 
+/* ========================================================================= */
+/* HEADER                                                                    */
+/* ========================================================================= */
+
 export default function Header() {
+
+  const {
+    openMobileSidebar,
+  } =
+    useMobileSidebar();
+
 
   const [
     user,
@@ -107,6 +129,7 @@ export default function Header() {
       null
     );
 
+
   const [
     notifications,
     setNotifications,
@@ -114,6 +137,7 @@ export default function Header() {
     useState<NotificationItem[]>(
       []
     );
+
 
   const [
     unreadCount,
@@ -123,6 +147,7 @@ export default function Header() {
       0
     );
 
+
   const [
     notificationOpen,
     setNotificationOpen,
@@ -130,6 +155,7 @@ export default function Header() {
     useState(
       false
     );
+
 
   const [
     notificationLoading,
@@ -139,6 +165,7 @@ export default function Header() {
       false
     );
 
+
   const [
     notificationError,
     setNotificationError,
@@ -146,6 +173,7 @@ export default function Header() {
     useState(
       ""
     );
+
 
   const notificationRef =
     useRef<HTMLDivElement | null>(
@@ -364,6 +392,7 @@ export default function Header() {
           setNotifications(
             []
           );
+
 
           setUnreadCount(
             0
@@ -594,8 +623,10 @@ export default function Header() {
               notification.id
                 ? {
                     ...item,
+
                     isRead:
                       true,
+
                     readAt:
                       Date.now(),
                   }
@@ -862,15 +893,35 @@ export default function Header() {
 
     <header className="sticky top-0 z-40 border-b border-white/10 bg-[#07111f]/95 backdrop-blur-xl">
 
-      <div className="mx-auto flex h-20 max-w-[1700px] items-center justify-between px-5 lg:px-8">
+      <div className="mx-auto flex h-20 max-w-[1700px] items-center justify-between px-3 sm:px-5 lg:px-8">
 
 
-        {/* LEFT SIDE */}
+        {/* ================================================================= */}
+        {/* LEFT SIDE                                                        */}
+        {/* ================================================================= */}
 
-        <div className="flex items-center gap-3">
+        <div className="flex min-w-0 items-center gap-2 sm:gap-3">
 
 
-          <div className="relative h-12 w-12 shrink-0 overflow-hidden rounded-xl border border-blue-400/20 bg-[#081423] p-1 shadow-[0_0_25px_rgba(59,130,246,0.15)]">
+          {/* MOBILE MENU */}
+
+          <button
+            type="button"
+            onClick={
+              openMobileSidebar
+            }
+            aria-label="Open navigation menu"
+            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-white/10 bg-white/[0.03] text-slate-300 transition hover:border-blue-400/20 hover:bg-blue-500/10 hover:text-blue-300 lg:hidden"
+          >
+
+            <Menu className="h-5 w-5" />
+
+          </button>
+
+
+          {/* LOGO */}
+
+          <div className="relative hidden h-12 w-12 shrink-0 overflow-hidden rounded-xl border border-blue-400/20 bg-[#081423] p-1 shadow-[0_0_25px_rgba(59,130,246,0.15)] sm:block">
 
             <Image
               src="/pravaah-icon.png"
@@ -884,18 +935,18 @@ export default function Header() {
           </div>
 
 
-          <div>
+          <div className="min-w-0">
 
             <div className="flex items-center gap-2">
 
-              <h1 className="text-xl font-black tracking-[0.08em] text-white">
+              <h1 className="truncate text-base font-black tracking-[0.06em] text-white sm:text-xl sm:tracking-[0.08em]">
 
                 PRAVAAH
 
               </h1>
 
 
-              <div className="hidden items-center gap-1.5 rounded-full border border-emerald-500/20 bg-emerald-500/10 px-2 py-0.5 sm:flex">
+              <div className="hidden items-center gap-1.5 rounded-full border border-emerald-500/20 bg-emerald-500/10 px-2 py-0.5 md:flex">
 
                 <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.9)]" />
 
@@ -911,7 +962,7 @@ export default function Header() {
             </div>
 
 
-            <p className="mt-0.5 text-[11px] text-slate-500">
+            <p className="mt-0.5 hidden truncate text-[11px] text-slate-500 sm:block">
 
               Disaster Intelligence Platform
 
@@ -922,9 +973,11 @@ export default function Header() {
         </div>
 
 
-        {/* RIGHT SIDE */}
+        {/* ================================================================= */}
+        {/* RIGHT SIDE                                                       */}
+        {/* ================================================================= */}
 
-        <div className="flex items-center gap-3 sm:gap-5 lg:gap-7">
+        <div className="flex shrink-0 items-center gap-2 sm:gap-5 lg:gap-7">
 
 
           {/* SYSTEM STATUS */}
@@ -949,7 +1002,9 @@ export default function Header() {
           </div>
 
 
-          {/* NOTIFICATIONS */}
+          {/* ================================================================= */}
+          {/* NOTIFICATIONS                                                     */}
+          {/* ================================================================= */}
 
           <div
             ref={
@@ -1008,7 +1063,7 @@ export default function Header() {
 
             {notificationOpen && (
 
-              <div className="absolute right-0 top-14 w-[360px] max-w-[calc(100vw-24px)] overflow-hidden rounded-2xl border border-white/10 bg-[#081423] shadow-[0_30px_100px_rgba(0,0,0,0.65)] backdrop-blur-2xl sm:w-[400px]">
+              <div className="fixed left-3 right-3 top-[88px] overflow-hidden rounded-2xl border border-white/10 bg-[#081423] shadow-[0_30px_100px_rgba(0,0,0,0.65)] backdrop-blur-2xl sm:absolute sm:left-auto sm:right-0 sm:top-14 sm:w-[400px]">
 
 
                 <div className="flex items-center justify-between border-b border-white/10 px-4 py-4">
@@ -1100,7 +1155,7 @@ export default function Header() {
                 )}
 
 
-                <div className="max-h-[480px] overflow-y-auto">
+                <div className="max-h-[60vh] overflow-y-auto sm:max-h-[480px]">
 
 
                   {!getToken() ? (
@@ -1223,12 +1278,13 @@ export default function Header() {
           </div>
 
 
-          {/* USER PROFILE */}
+          {/* ================================================================= */}
+          {/* USER PROFILE                                                      */}
+          {/* ================================================================= */}
 
-          <div className="flex items-center gap-3 border-l border-white/10 pl-3 sm:pl-5">
+          <div className="flex items-center gap-3 border-l border-white/10 pl-2 sm:pl-5">
 
-
-            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-blue-500/30 via-blue-500/15 to-cyan-500/10 text-sm font-bold text-blue-200 ring-1 ring-blue-400/20">
+            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-blue-500/30 via-blue-500/15 to-cyan-500/10 text-xs font-bold text-blue-200 ring-1 ring-blue-400/20 sm:h-10 sm:w-10 sm:text-sm">
 
               {
                 initials
