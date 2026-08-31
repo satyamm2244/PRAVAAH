@@ -50,6 +50,11 @@ from auth import (
 
 from emergency_assistant import generate_emergency_response
 
+from risk_engine import (
+    assess_ward_hazards,
+    build_hazard_summary,
+)
+
 
 # =============================================================================
 # DATABASE INITIALIZATION
@@ -224,6 +229,484 @@ def normalize_ward(ward_id: str):
 
     return ward_id
 
+
+# =============================================================================
+# ALERT POLICY
+# =============================================================================
+
+ALERT_LEVEL_RANK = {
+    "NORMAL": 0,
+    "WATCH": 1,
+    "HIGH": 2,
+    "CRITICAL": 3,
+}
+
+ALERT_PRIORITY_BY_LEVEL = {
+    "WATCH": "MEDIUM",
+    "HIGH": "HIGH",
+    "CRITICAL": "CRITICAL",
+}
+
+ALERT_COOLDOWN_MINUTES = 30
+ALERT_CANDIDATE_BUCKET_MINUTES = 15
+
+
+def normalize_hazard_type(hazard_type: str):
+    clean_hazard = (
+        (hazard_type or "UNKNOWN")
+        .strip()
+        .upper()
+        .replace("-", "_")
+        .replace(" ", "_")
+    )
+
+    aliases = {
+        "WEATHER": "SEVERE_WEATHER",
+        "SEVEREWEATHER": "SEVERE_WEATHER",
+        "EARTHQUAKE": "SEISMIC",
+        "STRUCTURAL": "INFRASTRUCTURE",
+    }
+
+    return aliases.get(
+        clean_hazard,
+        clean_hazard,
+    )
+
+
+def get_published_alert_for_ward_hazard(
+    ward_id: str,
+    hazard_type: str,
+    db: Session,
+):
+    clean_hazard = normalize_hazard_type(
+        hazard_type
+    )
+
+    return (
+        db.query(Alert)
+        .filter(
+            Alert.ward == ward_id,
+            Alert.primary_hazard == clean_hazard,
+            Alert.status == "PUBLISHED",
+        )
+        .order_by(
+            Alert.published_at.desc()
+        )
+        .first()
+    )
+
+
+def get_recent_dismissed_alert_for_ward_hazard(
+    ward_id: str,
+    hazard_type: str,
+    db: Session,
+):
+    cutoff = (
+        int(time.time() * 1000)
+        - ALERT_COOLDOWN_MINUTES * 60 * 1000
+    )
+
+    clean_hazard = normalize_hazard_type(
+        hazard_type
+    )
+
+    return (
+        db.query(Alert)
+        .filter(
+            Alert.ward == ward_id,
+            Alert.primary_hazard == clean_hazard,
+            Alert.status == "DISMISSED",
+            Alert.dismissed_at.isnot(None),
+            Alert.dismissed_at >= cutoff,
+        )
+        .order_by(
+            Alert.dismissed_at.desc()
+        )
+        .first()
+    )
+
+
+def build_alert_candidate_id(
+    ward_id: str,
+    hazard_type: str,
+    now_ms: int,
+):
+    bucket_ms = (
+        ALERT_CANDIDATE_BUCKET_MINUTES
+        * 60
+        * 1000
+    )
+
+    bucket = now_ms // bucket_ms
+
+    clean_hazard = (
+        normalize_hazard_type(hazard_type)
+        .lower()
+        .replace("_", "-")
+    )
+
+    return (
+        f"candidate-{ward_id.lower()}-"
+        f"{clean_hazard}-{bucket}"
+    )
+
+
+def candidate_uses_only_stale_physical_evidence(
+    hazard: dict,
+):
+    evidence = hazard.get(
+        "evidence",
+        [],
+    )
+
+    if not evidence:
+        return False
+
+    physical = [
+        item
+        for item in evidence
+        if item.get("sourceType")
+        != "CITIZEN_REPORT"
+    ]
+
+    if not physical:
+        return False
+
+    return all(
+        item.get(
+            "freshness",
+            {},
+        ).get("status")
+        in {
+            "STALE",
+            "VERY_STALE",
+        }
+        for item in physical
+    )
+
+
+def build_alert_candidate(
+    ward_id: str,
+    hazard: dict,
+    now_ms: int,
+):
+    hazard_type = normalize_hazard_type(
+        hazard.get(
+            "hazardType",
+            "UNKNOWN",
+        )
+    )
+
+    level = (
+        hazard.get(
+            "riskLevel",
+            "NORMAL",
+        )
+        .strip()
+        .upper()
+    )
+
+    risk = int(
+        hazard.get(
+            "riskScore",
+            0,
+        )
+    )
+
+    confidence = int(
+        hazard.get(
+            "confidenceScore",
+            0,
+        )
+    )
+
+    affected_area = hazard.get(
+        "affectedArea",
+        {
+            "primaryWard": ward_id,
+            "scope": "WARD",
+            "description": ward_id,
+        },
+    )
+
+    area_description = (
+        affected_area.get(
+            "description"
+        )
+        or ward_id
+    )
+
+    citizen_actions = hazard.get(
+        "citizenActions",
+        [],
+    )
+
+    recommended_action = (
+        citizen_actions[0]
+        if citizen_actions
+        else "Follow official emergency instructions."
+    )
+
+    stale_only = (
+        candidate_uses_only_stale_physical_evidence(
+            hazard
+        )
+    )
+
+    return {
+        "id": build_alert_candidate_id(
+            ward_id,
+            hazard_type,
+            now_ms,
+        ),
+        "ward": ward_id,
+        "priority":
+            ALERT_PRIORITY_BY_LEVEL.get(
+                level,
+                "MEDIUM",
+            ),
+        "trigger":
+            "MULTI_HAZARD_FUSION",
+        "level":
+            level,
+        "title": (
+            f"{hazard_type.replace('_', ' ').title()} "
+            f"Alert - {ward_id}"
+        ),
+        "message": (
+            f"{level} "
+            f"{hazard_type.replace('_', ' ').lower()} "
+            f"risk detected for {area_description}. "
+            f"Risk score {risk}/100 with "
+            f"{confidence}% confidence."
+        ),
+        "risk":
+            risk,
+        "confidence":
+            confidence,
+        "primaryHazard":
+            hazard_type,
+        "recommendedAction":
+            recommended_action,
+        "createdAt":
+            now_ms,
+        "affectedArea":
+            affected_area,
+        "evidence":
+            hazard.get(
+                "evidence",
+                [],
+            ),
+        "evidenceCount":
+            hazard.get(
+                "evidenceCount",
+                0,
+            ),
+        "citizenActions":
+            citizen_actions,
+        "officerActions":
+            hazard.get(
+                "officerActions",
+                [],
+            ),
+        "dataFreshness":
+            hazard.get(
+                "dataFreshness",
+                {},
+            ),
+        "staleOnlyPhysicalEvidence":
+            stale_only,
+        "publishRecommended":
+            not stale_only,
+        "source":
+            "MULTI_HAZARD_ENGINE",
+        "candidateAction":
+            (
+                "OFFICER_REVIEW_STALE"
+                if stale_only
+                else "NEW"
+            ),
+    }
+
+# =============================================================================
+# ALERT CANDIDATES
+# =============================================================================
+
+@app.get("/api/alerts/candidates")
+def get_alert_candidates(
+    db: Session = Depends(get_db),
+    current_officer=Depends(require_officer),
+):
+    update_simulation()
+    fetch_real_rainfall()
+
+    candidates = []
+
+    suppressed_duplicates = 0
+    suppressed_cooldown = 0
+    escalation_candidates = 0
+    stale_review_candidates = 0
+
+    now_ms = int(
+        time.time() * 1000
+    )
+
+    for ward_id in WARD_COORDINATES:
+        ward_data = build_ward_response(
+            ward_id,
+            db,
+        )
+
+        multi_hazard = ward_data.get(
+            "multiHazard",
+            {},
+        )
+
+        hazards = multi_hazard.get(
+            "hazards",
+            [],
+        )
+
+        for hazard in hazards:
+            level = (
+                hazard.get(
+                    "riskLevel",
+                    "NORMAL",
+                )
+                .strip()
+                .upper()
+            )
+
+            if level == "NORMAL":
+                continue
+
+            hazard_type = normalize_hazard_type(
+                hazard.get(
+                    "hazardType",
+                    "UNKNOWN",
+                )
+            )
+
+            existing_published = (
+                get_published_alert_for_ward_hazard(
+                    ward_id=ward_id,
+                    hazard_type=hazard_type,
+                    db=db,
+                )
+            )
+
+            if existing_published is not None:
+                incoming_rank = (
+                    ALERT_LEVEL_RANK.get(
+                        level,
+                        0,
+                    )
+                )
+
+                existing_rank = (
+                    ALERT_LEVEL_RANK.get(
+                        (
+                            existing_published.level
+                            or "NORMAL"
+                        )
+                        .strip()
+                        .upper(),
+                        0,
+                    )
+                )
+
+                if incoming_rank <= existing_rank:
+                    suppressed_duplicates += 1
+                    continue
+
+            recent_dismissed = (
+                get_recent_dismissed_alert_for_ward_hazard(
+                    ward_id=ward_id,
+                    hazard_type=hazard_type,
+                    db=db,
+                )
+            )
+
+            if recent_dismissed is not None:
+                suppressed_cooldown += 1
+                continue
+
+            candidate = build_alert_candidate(
+                ward_id,
+                hazard,
+                now_ms,
+            )
+
+            if existing_published is not None:
+                candidate[
+                    "candidateAction"
+                ] = "ESCALATE"
+
+                candidate[
+                    "existingAlertId"
+                ] = existing_published.id
+
+                candidate[
+                    "existingLevel"
+                ] = existing_published.level
+
+                escalation_candidates += 1
+
+            elif (
+                candidate[
+                    "candidateAction"
+                ]
+                == "OFFICER_REVIEW_STALE"
+            ):
+                stale_review_candidates += 1
+
+            candidates.append(
+                candidate
+            )
+
+    candidates.sort(
+        key=lambda item: (
+            ALERT_LEVEL_RANK.get(
+                item.get(
+                    "level",
+                    "NORMAL",
+                ),
+                0,
+            ),
+            item.get(
+                "risk",
+                0,
+            ),
+            item.get(
+                "confidence",
+                0,
+            ),
+        ),
+        reverse=True,
+    )
+
+    return {
+        "count":
+            len(candidates),
+        "suppressedDuplicates":
+            suppressed_duplicates,
+        "suppressedCooldown":
+            suppressed_cooldown,
+        "escalationCandidates":
+            escalation_candidates,
+        "staleReviewCandidates":
+            stale_review_candidates,
+        "cooldownMinutes":
+            ALERT_COOLDOWN_MINUTES,
+        "candidateBucketMinutes":
+            ALERT_CANDIDATE_BUCKET_MINUTES,
+        "generatedAt":
+            int(time.time() * 1000),
+        "candidates":
+            candidates,
+    }
+
+
 # =============================================================================
 # ALERT HISTORY
 # =============================================================================
@@ -277,50 +760,175 @@ def publish_alert(
             detail="Alert already exists.",
         )
 
+    clean_primary_hazard = (
+        normalize_hazard_type(
+            request.primaryHazard
+        )
+    )
+
+    incoming_level = (
+        request.level
+        .strip()
+        .upper()
+    )
+
+    if incoming_level not in ALERT_LEVEL_RANK:
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid alert level.",
+        )
+
+    duplicate_published_alert = (
+        get_published_alert_for_ward_hazard(
+            ward_id=ward_id,
+            hazard_type=clean_primary_hazard,
+            db=db,
+        )
+    )
+
+    if duplicate_published_alert is not None:
+        existing_level = (
+            duplicate_published_alert.level
+            or "NORMAL"
+        ).strip().upper()
+
+        incoming_rank = ALERT_LEVEL_RANK.get(
+            incoming_level,
+            0,
+        )
+
+        existing_rank = ALERT_LEVEL_RANK.get(
+            existing_level,
+            0,
+        )
+
+        if incoming_rank <= existing_rank:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "message": (
+                        "An active published alert already exists "
+                        "for this ward and hazard at the same or "
+                        "higher severity."
+                    ),
+                    "existingAlertId":
+                        duplicate_published_alert.id,
+                    "ward":
+                        ward_id,
+                    "primaryHazard":
+                        clean_primary_hazard,
+                    "existingLevel":
+                        existing_level,
+                    "incomingLevel":
+                        incoming_level,
+                },
+            )
+
+        duplicate_published_alert.priority = (
+            request.priority
+            .strip()
+            .upper()
+        )
+        duplicate_published_alert.trigger = (
+            request.trigger
+            .strip()
+            .upper()
+        )
+        duplicate_published_alert.level = (
+            incoming_level
+        )
+        duplicate_published_alert.title = (
+            request.title.strip()
+        )
+        duplicate_published_alert.message = (
+            request.message.strip()
+        )
+        duplicate_published_alert.risk = (
+            request.risk
+        )
+        duplicate_published_alert.confidence = (
+            request.confidence
+        )
+        duplicate_published_alert.recommended_action = (
+            request.recommendedAction.strip()
+        )
+        duplicate_published_alert.primary_hazard = (
+            clean_primary_hazard
+        )
+
+        try:
+            create_notification(
+                db=db,
+                recipient_role="USER",
+                notification_type="ALERT",
+                severity=incoming_level,
+                title=(
+                    "Alert Escalated: "
+                    f"{request.title.strip()}"
+                ),
+                message=request.message.strip(),
+                ward=ward_id,
+                action_type="VIEW_ALERT",
+                action_target=
+                    duplicate_published_alert.id,
+            )
+
+            db.commit()
+            db.refresh(
+                duplicate_published_alert
+            )
+
+        except Exception as error:
+            db.rollback()
+            print(
+                "Unable to escalate alert:",
+                error,
+            )
+            raise HTTPException(
+                status_code=500,
+                detail="Unable to escalate alert.",
+            )
+
+        return alert_to_dict(
+            duplicate_published_alert
+        )
+
     now = int(
         time.time() * 1000
     )
 
     alert = Alert(
         id=request.id,
-
         ward=ward_id,
-
-        priority=request.priority.strip().upper(),
-
-        trigger=request.trigger.strip().upper(),
-
-        level=request.level.strip().upper(),
-
-        title=request.title.strip(),
-
-        message=request.message.strip(),
-
-        risk=request.risk,
-
-        confidence=request.confidence,
-
+        priority=
+            request.priority.strip().upper(),
+        trigger=
+            request.trigger.strip().upper(),
+        level=
+            incoming_level,
+        title=
+            request.title.strip(),
+        message=
+            request.message.strip(),
+        risk=
+            request.risk,
+        confidence=
+            request.confidence,
         primary_hazard=
-            request.primaryHazard.strip(),
-
+            clean_primary_hazard,
         recommended_action=
             request.recommendedAction.strip(),
-
         status="PUBLISHED",
-
         published_by=
             getattr(
                 current_officer,
                 "id",
                 None,
             ),
-
         created_at=
             request.createdAt,
-
         published_at=
             now,
-
         dismissed_at=
             None,
     )
@@ -332,7 +940,7 @@ def publish_alert(
             db=db,
             recipient_role="USER",
             notification_type="ALERT",
-            severity=request.level,
+            severity=incoming_level,
             title=request.title,
             message=request.message,
             ward=ward_id,
@@ -341,17 +949,14 @@ def publish_alert(
         )
 
         db.commit()
-
         db.refresh(alert)
 
     except Exception as error:
         db.rollback()
-
         print(
             "Unable to publish alert:",
             error,
         )
-
         raise HTTPException(
             status_code=500,
             detail="Unable to publish alert.",
@@ -447,6 +1052,158 @@ def dismiss_alert(
     return alert_to_dict(
         alert
     )
+
+# =============================================================================
+# DISMISS ALERT CANDIDATE
+# =============================================================================
+
+@app.post("/api/alerts/candidates/{candidate_id}/dismiss")
+def dismiss_alert_candidate(
+    candidate_id: str,
+    ward: str,
+    hazard: str,
+    level: str,
+    risk: int,
+    confidence: int,
+    db: Session = Depends(get_db),
+    current_officer=Depends(require_officer),
+):
+    ward_id = normalize_ward(
+        ward
+    )
+
+    clean_hazard = normalize_hazard_type(
+        hazard
+    )
+
+    clean_level = (
+        level
+        .strip()
+        .upper()
+    )
+
+    if clean_level not in ALERT_LEVEL_RANK:
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid alert level.",
+        )
+
+    existing = (
+        db.query(Alert)
+        .filter(
+            Alert.id == candidate_id
+        )
+        .first()
+    )
+
+    if existing is not None:
+        if existing.status == "DISMISSED":
+            return alert_to_dict(
+                existing
+            )
+
+        raise HTTPException(
+            status_code=409,
+            detail="Candidate ID already exists.",
+        )
+
+    active_alert = (
+        get_published_alert_for_ward_hazard(
+            ward_id=ward_id,
+            hazard_type=clean_hazard,
+            db=db,
+        )
+    )
+
+    if active_alert is not None:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "message": (
+                    "A published alert already exists "
+                    "for this ward and hazard."
+                ),
+                "existingAlertId":
+                    active_alert.id,
+            },
+        )
+
+    now = int(
+        time.time() * 1000
+    )
+
+    dismissed_candidate = Alert(
+        id=candidate_id,
+        ward=ward_id,
+        priority=
+            ALERT_PRIORITY_BY_LEVEL.get(
+                clean_level,
+                "MEDIUM",
+            ),
+        trigger="MULTI_HAZARD_FUSION",
+        level=clean_level,
+        title=(
+            f"{clean_hazard.replace('_', ' ').title()} "
+            f"Candidate - {ward_id}"
+        ),
+        message=(
+            "Alert candidate dismissed "
+            "during officer review."
+        ),
+        risk=int(
+            clamp(
+                risk,
+                0,
+                100,
+            )
+        ),
+        confidence=int(
+            clamp(
+                confidence,
+                0,
+                100,
+            )
+        ),
+        primary_hazard=
+            clean_hazard,
+        recommended_action=
+            "Officer reviewed and dismissed this candidate.",
+        status="DISMISSED",
+        published_by=
+            getattr(
+                current_officer,
+                "id",
+                None,
+            ),
+        created_at=now,
+        published_at=now,
+        dismissed_at=now,
+    )
+
+    try:
+        db.add(
+            dismissed_candidate
+        )
+        db.commit()
+        db.refresh(
+            dismissed_candidate
+        )
+
+    except Exception as error:
+        db.rollback()
+        print(
+            "Unable to dismiss alert candidate:",
+            error,
+        )
+        raise HTTPException(
+            status_code=500,
+            detail="Unable to dismiss alert candidate.",
+        )
+
+    return alert_to_dict(
+        dismissed_candidate
+    )
+
 
 # =============================================================================
 # SERIALIZERS
@@ -623,6 +1380,27 @@ def get_ward_report_breakdown(ward_id: str, db: Session):
         "total": count_total_ward_reports(ward_id, db),
     }
 
+def get_verified_ward_reports(
+    ward_id: str,
+    db: Session,
+):
+    reports = (
+        db.query(IncidentReport)
+        .filter(
+            IncidentReport.ward == ward_id,
+            IncidentReport.status == "VERIFIED",
+        )
+        .order_by(
+            IncidentReport.created_at.desc()
+        )
+        .all()
+    )
+
+    return [
+        report_to_dict(report)
+        for report in reports
+    ]
+
 
 # =============================================================================
 # SENSOR HELPERS
@@ -632,23 +1410,38 @@ def validate_sensor_type(sensor_type: str):
     clean_type = sensor_type.strip().upper()
 
     allowed_types = {
+        # Existing hydrological sensors
         "RIVER_LEVEL",
         "WATER_LEVEL",
         "RAINFALL",
         "DRAIN_LEVEL",
+
+        # Severe weather
+        "WIND_SPEED",
+
+        # Fire
+        "SMOKE",
+        "FIRE_RISK",
+
+        # Seismic
+        "SEISMIC_INTENSITY",
+
+        # Infrastructure
+        "INFRASTRUCTURE_STRESS",
     }
 
     if clean_type not in allowed_types:
         raise HTTPException(
             status_code=400,
             detail=(
-                "sensorType must be RIVER_LEVEL, WATER_LEVEL, "
-                "RAINFALL, or DRAIN_LEVEL."
+                "sensorType must be one of: "
+                "RIVER_LEVEL, WATER_LEVEL, RAINFALL, DRAIN_LEVEL, "
+                "WIND_SPEED, SMOKE, FIRE_RISK, "
+                "SEISMIC_INTENSITY, or INFRASTRUCTURE_STRESS."
             ),
         )
 
     return clean_type
-
 
 def validate_sensor_status(status: str):
     clean_status = status.strip().upper()
@@ -883,19 +1676,26 @@ async def save_photo(photo: UploadFile | None):
     return f"/uploads/{filename}"
 
 
+
 # =============================================================================
 # LATEST ONLINE RIVER SENSOR
 # =============================================================================
 
-def get_latest_online_river_sensor(
+def get_latest_online_sensor(
     ward_id: str,
+    sensor_type: str,
     db: Session,
 ):
+    """
+    Return the newest ONLINE reading for a specific
+    sensor type in a ward.
+    """
+
     return (
         db.query(SensorReading)
         .filter(
             SensorReading.ward == ward_id,
-            SensorReading.sensor_type == "RIVER_LEVEL",
+            SensorReading.sensor_type == sensor_type,
             SensorReading.status == "ONLINE",
         )
         .order_by(
@@ -905,18 +1705,43 @@ def get_latest_online_river_sensor(
     )
 
 
-# =============================================================================
-# BUILD WARD RESPONSE
-# =============================================================================
+def get_latest_online_river_sensor(
+    ward_id: str,
+    db: Session,
+):
+    """Backward-compatible helper for existing river-level logic."""
+
+    return get_latest_online_sensor(
+        ward_id=ward_id,
+        sensor_type="RIVER_LEVEL",
+        db=db,
+    )
 
 def build_ward_response(
     ward_id: str,
     db: Session,
 ):
-    coordinates = WARD_COORDINATES[ward_id]
-    reading = WARD_STATE[ward_id]
+    # =========================================================================
+    # BASE WARD INFORMATION
+    # =========================================================================
 
-    rainfall = get_rainfall(ward_id)
+    coordinates = WARD_COORDINATES[
+        ward_id
+    ]
+
+    reading = WARD_STATE[
+        ward_id
+    ]
+
+
+    # =========================================================================
+    # RAINFALL
+    # =========================================================================
+
+    rainfall = get_rainfall(
+        ward_id
+    )
+
 
     rainfall_source = (
         "Open-Meteo weather model"
@@ -924,78 +1749,474 @@ def build_ward_response(
         else "Simulated weather fallback"
     )
 
+
     rainfall_mode = (
         "REAL"
         if WEATHER_AVAILABLE
         else "SIMULATED"
     )
 
-    latest_river_sensor = get_latest_online_river_sensor(
-        ward_id,
-        db,
+
+    # =========================================================================
+    # RIVER LEVEL
+    # =========================================================================
+
+    latest_river_sensor = (
+        get_latest_online_river_sensor(
+            ward_id,
+            db,
+        )
     )
 
+
     if latest_river_sensor is not None:
+
         river_level = float(
             latest_river_sensor.value
         )
+
 
         river_level_source = (
             latest_river_sensor.sensor_id
         )
 
-        river_level_mode = "IOT"
+
+        river_level_mode = (
+            "IOT"
+        )
+
 
         river_level_timestamp = (
             latest_river_sensor.timestamp
         )
 
+
     else:
-        river_level = reading["riverLevelCm"]
+
+        river_level = (
+            reading[
+                "riverLevelCm"
+            ]
+        )
+
 
         river_level_source = (
             "Simulated river sensor fallback"
         )
 
-        river_level_mode = "SIMULATED"
-        river_level_timestamp = None
 
-    report_breakdown = get_ward_report_breakdown(
+        river_level_mode = (
+            "SIMULATED"
+        )
+
+
+        river_level_timestamp = (
+            None
+        )
+
+
+    # =========================================================================
+    # MULTI-HAZARD SENSOR OBSERVATIONS
+    # =========================================================================
+
+    latest_wind_sensor = get_latest_online_sensor(
         ward_id,
+        "WIND_SPEED",
         db,
     )
 
-    verified_report_count = report_breakdown[
-        "verified"
-    ]
+    latest_fire_sensor = get_latest_online_sensor(
+        ward_id,
+        "FIRE_RISK",
+        db,
+    )
 
-    reading["reportCount"] = verified_report_count
+    latest_smoke_sensor = get_latest_online_sensor(
+        ward_id,
+        "SMOKE",
+        db,
+    )
 
-    return {
-        "ward": ward_id,
-        "rainfallMm": rainfall,
-        "riverLevelCm": river_level,
-        "reportCount": verified_report_count,
-        "verifiedReportCount": report_breakdown["verified"],
-        "pendingReportCount": report_breakdown["pending"],
-        "rejectedReportCount": report_breakdown["rejected"],
-        "totalReportCount": report_breakdown["total"],
-        "latitude": coordinates["latitude"],
-        "longitude": coordinates["longitude"],
-        "dataMode": "HYBRID",
+    latest_seismic_sensor = get_latest_online_sensor(
+        ward_id,
+        "SEISMIC_INTENSITY",
+        db,
+    )
+
+    latest_infrastructure_sensor = get_latest_online_sensor(
+        ward_id,
+        "INFRASTRUCTURE_STRESS",
+        db,
+    )
+
+    def sensor_value(sensor):
+        if sensor is None:
+            return None
+
+        return float(sensor.value)
+
+    wind_speed_kmh = sensor_value(latest_wind_sensor)
+    fire_risk_index = sensor_value(latest_fire_sensor)
+    smoke_level = sensor_value(latest_smoke_sensor)
+    seismic_intensity = sensor_value(latest_seismic_sensor)
+    infrastructure_stress = sensor_value(
+        latest_infrastructure_sensor
+    )
+
+
+    # =========================================================================
+    # REPORT INFORMATION
+    # =========================================================================
+
+    report_breakdown = (
+        get_ward_report_breakdown(
+            ward_id,
+            db,
+        )
+    )
+
+
+    verified_report_count = (
+        report_breakdown[
+            "verified"
+        ]
+    )
+
+
+    reading[
+        "reportCount"
+    ] = verified_report_count
+
+
+    # Get the actual verified report objects.
+    #
+    # The old system only needed the number of reports.
+    # Multi-hazard fusion needs report type, severity,
+    # description, and verification information.
+    verified_reports = (
+        get_verified_ward_reports(
+            ward_id,
+            db,
+        )
+    )
+
+
+    # =========================================================================
+    # BASE WARD RESPONSE
+    # =========================================================================
+
+    ward_response = {
+
+        "ward":
+            ward_id,
+
+
+        # ---------------------------------------------------------------------
+        # EXISTING ENVIRONMENTAL DATA
+        # ---------------------------------------------------------------------
+
+        "rainfallMm":
+            rainfall,
+
+        "riverLevelCm":
+            river_level,
+
+        # ---------------------------------------------------------------------
+        # MULTI-HAZARD SENSOR VALUES
+        # ---------------------------------------------------------------------
+
+        "windSpeedKmh":
+            wind_speed_kmh,
+
+        "fireRiskIndex":
+            fire_risk_index,
+
+        "smokeLevel":
+            smoke_level,
+
+        "seismicIntensity":
+            seismic_intensity,
+
+        "infrastructureStress":
+            infrastructure_stress,
+
+
+        # ---------------------------------------------------------------------
+        # EXISTING REPORT COUNTS
+        # ---------------------------------------------------------------------
+
+        "reportCount":
+            verified_report_count,
+
+        "verifiedReportCount":
+            report_breakdown[
+                "verified"
+            ],
+
+        "pendingReportCount":
+            report_breakdown[
+                "pending"
+            ],
+
+        "rejectedReportCount":
+            report_breakdown[
+                "rejected"
+            ],
+
+        "totalReportCount":
+            report_breakdown[
+                "total"
+            ],
+
+
+        # ---------------------------------------------------------------------
+        # LOCATION
+        # ---------------------------------------------------------------------
+
+        "latitude":
+            coordinates[
+                "latitude"
+            ],
+
+        "longitude":
+            coordinates[
+                "longitude"
+            ],
+
+
+        # ---------------------------------------------------------------------
+        # DATA MODE
+        # ---------------------------------------------------------------------
+
+        "dataMode":
+            "HYBRID",
+
+
+        # ---------------------------------------------------------------------
+        # DATA SOURCES
+        # ---------------------------------------------------------------------
 
         "sources": {
-            "rainfall": rainfall_source,
-            "rainfallMode": rainfall_mode,
-            "riverLevel": river_level_source,
-            "riverLevelMode": river_level_mode,
-            "riverLevelTimestamp": river_level_timestamp,
-            "crowdReports": "Human-verified citizen reports",
-            "crowdReportsMode": "REAL",
+
+            "rainfall":
+                rainfall_source,
+
+            "rainfallMode":
+                rainfall_mode,
+
+            "riverLevel":
+                river_level_source,
+
+            "riverLevelMode":
+                river_level_mode,
+
+            "riverLevelTimestamp":
+                river_level_timestamp,
+
+            "windSpeed": (
+                latest_wind_sensor.sensor_id
+                if latest_wind_sensor
+                else None
+            ),
+
+            "windSpeedMode": (
+                latest_wind_sensor.source
+                if latest_wind_sensor
+                else None
+            ),
+
+            "windSpeedTimestamp": (
+                latest_wind_sensor.timestamp
+                if latest_wind_sensor
+                else None
+            ),
+
+            "fireRisk": (
+                latest_fire_sensor.sensor_id
+                if latest_fire_sensor
+                else None
+            ),
+
+            "fireRiskMode": (
+                latest_fire_sensor.source
+                if latest_fire_sensor
+                else None
+            ),
+
+            "fireRiskTimestamp": (
+                latest_fire_sensor.timestamp
+                if latest_fire_sensor
+                else None
+            ),
+
+            "smoke": (
+                latest_smoke_sensor.sensor_id
+                if latest_smoke_sensor
+                else None
+            ),
+
+            "smokeMode": (
+                latest_smoke_sensor.source
+                if latest_smoke_sensor
+                else None
+            ),
+
+            "smokeTimestamp": (
+                latest_smoke_sensor.timestamp
+                if latest_smoke_sensor
+                else None
+            ),
+
+            "seismic": (
+                latest_seismic_sensor.sensor_id
+                if latest_seismic_sensor
+                else None
+            ),
+
+            "seismicMode": (
+                latest_seismic_sensor.source
+                if latest_seismic_sensor
+                else None
+            ),
+
+            "seismicTimestamp": (
+                latest_seismic_sensor.timestamp
+                if latest_seismic_sensor
+                else None
+            ),
+
+            "infrastructure": (
+                latest_infrastructure_sensor.sensor_id
+                if latest_infrastructure_sensor
+                else None
+            ),
+
+            "infrastructureMode": (
+                latest_infrastructure_sensor.source
+                if latest_infrastructure_sensor
+                else None
+            ),
+
+            "infrastructureTimestamp": (
+                latest_infrastructure_sensor.timestamp
+                if latest_infrastructure_sensor
+                else None
+            ),
+
+            "crowdReports":
+                "Human-verified citizen reports",
+
+            "crowdReportsMode":
+                "REAL",
         },
 
-        "timestamp": int(time.time() * 1000),
+
+        # ---------------------------------------------------------------------
+        # TIMESTAMP
+        # ---------------------------------------------------------------------
+
+        "timestamp":
+            int(
+                time.time()
+                * 1000
+            ),
     }
+
+
+    # =========================================================================
+    # MULTI-HAZARD FUSION
+    # =========================================================================
+
+    fusion_result = (
+        assess_ward_hazards(
+            ward_data=
+                ward_response,
+
+            verified_reports=
+                verified_reports,
+        )
+    )
+
+
+    # =========================================================================
+    # LIGHTWEIGHT SUMMARY
+    # =========================================================================
+
+    hazard_summary = (
+        build_hazard_summary(
+            fusion_result
+        )
+    )
+
+
+    # =========================================================================
+    # BACKWARD-COMPATIBLE TOP-LEVEL FIELDS
+    # =========================================================================
+    #
+    # Existing frontend code can continue using rainfallMm,
+    # riverLevelCm, reportCount, etc.
+    #
+    # New frontend code can use these additional fields.
+
+    ward_response[
+        "primaryHazard"
+    ] = hazard_summary[
+        "primaryHazard"
+    ]
+
+
+    ward_response[
+        "riskScore"
+    ] = hazard_summary[
+        "riskScore"
+    ]
+
+
+    ward_response[
+        "riskLevel"
+    ] = hazard_summary[
+        "riskLevel"
+    ]
+
+
+    ward_response[
+        "confidenceScore"
+    ] = hazard_summary[
+        "confidenceScore"
+    ]
+
+
+    ward_response[
+        "confidenceLevel"
+    ] = hazard_summary[
+        "confidenceLevel"
+    ]
+
+
+    ward_response[
+        "activeHazardCount"
+    ] = hazard_summary[
+        "activeHazardCount"
+    ]
+
+
+    ward_response[
+        "activeHazards"
+    ] = hazard_summary[
+        "activeHazards"
+    ]
+
+
+    # =========================================================================
+    # FULL MULTI-HAZARD INTELLIGENCE
+    # =========================================================================
+
+    ward_response[
+        "multiHazard"
+    ] = fusion_result
+
+
+    return ward_response
 
 
 # =============================================================================
