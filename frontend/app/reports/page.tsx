@@ -60,6 +60,17 @@ type FilterTab =
   | "ALL"
   | BackendReportStatus;
 
+type CategoryFilter =
+  | "ALL"
+  | "WATERLOGGING"
+  | "FLOODING"
+  | "ROAD_BLOCKAGE"
+  | "DRAINAGE_OVERFLOW"
+  | "TREE_FALL"
+  | "ELECTRICAL_HAZARD"
+  | "INFRASTRUCTURE_DAMAGE"
+  | "OTHER";
+
 
 /* ========================================================================= */
 /* CONFIG                                                                    */
@@ -97,6 +108,57 @@ const FILTERS: {
 ];
 
 
+const CATEGORY_FILTERS: {
+  label: string;
+  value: CategoryFilter;
+}[] = [
+  {
+    label: "All Categories",
+    value: "ALL",
+  },
+
+  {
+    label: "Waterlogging",
+    value: "WATERLOGGING",
+  },
+
+  {
+    label: "Flooding",
+    value: "FLOODING",
+  },
+
+  {
+    label: "Road Blockage",
+    value: "ROAD_BLOCKAGE",
+  },
+
+  {
+    label: "Drainage Overflow",
+    value: "DRAINAGE_OVERFLOW",
+  },
+
+  {
+    label: "Tree Fall",
+    value: "TREE_FALL",
+  },
+
+  {
+    label: "Electrical Hazard",
+    value: "ELECTRICAL_HAZARD",
+  },
+
+  {
+    label: "Infrastructure Damage",
+    value: "INFRASTRUCTURE_DAMAGE",
+  },
+
+  {
+    label: "Other",
+    value: "OTHER",
+  },
+];
+
+
 /* ========================================================================= */
 /* PAGE                                                                      */
 /* ========================================================================= */
@@ -107,6 +169,14 @@ function ReportsPageContent() {
 
   const [filter, setFilter] =
     useState<FilterTab>("ALL");
+
+  const [
+    categoryFilter,
+    setCategoryFilter,
+  ] =
+    useState<CategoryFilter>(
+      "ALL"
+    );
 
   const [loading, setLoading] =
     useState(true);
@@ -334,13 +404,27 @@ function ReportsPageContent() {
   /* ----------------------------------------------------------------------- */
 
   const filteredReports =
-    filter === "ALL"
-      ? reports
-      : reports.filter(
-          (report) =>
-            report.status ===
-            filter
+    reports.filter(
+      (report) => {
+
+        const statusMatches =
+          filter === "ALL" ||
+          report.status ===
+            filter;
+
+        const categoryMatches =
+          categoryFilter === "ALL" ||
+          getReportCategory(
+            report.reportType
+          ) ===
+            categoryFilter;
+
+        return (
+          statusMatches &&
+          categoryMatches
         );
+      }
+    );
 
 
   /* ----------------------------------------------------------------------- */
@@ -518,59 +602,205 @@ function ReportsPageContent() {
 
 
           {/* =============================================================== */}
-          {/* FILTER                                                          */}
+          {/* FILTERS                                                         */}
           {/* =============================================================== */}
 
-          <div className="mb-6 flex flex-wrap gap-2">
+          <div className="mb-6 rounded-2xl border border-white/10 bg-[#0a1728] p-4">
 
-            {FILTERS.map(
-              (filterOption) => {
+            {/* STATUS FILTER */}
 
-                const count =
-                  filterOption.value ===
-                  "ALL"
-                    ? reports.length
-                    : reports.filter(
-                        (
-                          report
-                        ) =>
-                          report.status ===
+            <div>
+
+              <p className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-slate-500">
+                Verification Status
+              </p>
+
+
+              <div className="flex flex-wrap gap-2">
+
+                {FILTERS.map(
+                  (filterOption) => {
+
+                    const count =
+                      filterOption.value ===
+                      "ALL"
+                        ? reports.length
+                        : reports.filter(
+                            (
+                              report
+                            ) =>
+                              report.status ===
+                              filterOption.value
+                          ).length;
+
+
+                    return (
+                      <button
+                        key={
                           filterOption.value
-                      ).length;
+                        }
+                        type="button"
+                        onClick={() =>
+                          setFilter(
+                            filterOption.value
+                          )
+                        }
+                        className={`rounded-lg px-4 py-2 text-sm font-medium transition ${
+                          filter ===
+                          filterOption.value
+                            ? "bg-blue-500/15 text-blue-300 ring-1 ring-blue-500/20"
+                            : "text-slate-400 hover:bg-white/5 hover:text-slate-200"
+                        }`}
+                      >
+
+                        {
+                          filterOption.label
+                        }
 
 
-                return (
+                        <span className="ml-1.5 text-xs text-slate-500">
+                          ({count})
+                        </span>
+
+                      </button>
+                    );
+                  }
+                )}
+
+              </div>
+
+            </div>
+
+
+            {/* CATEGORY FILTER */}
+
+            <div className="mt-4 border-t border-white/5 pt-4">
+
+              <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+
+                <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">
+                  Incident Category
+                </p>
+
+
+                {(filter !== "ALL" ||
+                  categoryFilter !==
+                    "ALL") && (
+
                   <button
-                    key={
-                      filterOption.value
-                    }
                     type="button"
-                    onClick={() =>
+                    onClick={() => {
                       setFilter(
-                        filterOption.value
-                      )
-                    }
-                    className={`rounded-lg px-4 py-2 text-sm font-medium transition ${
-                      filter ===
-                      filterOption.value
-                        ? "bg-blue-500/15 text-blue-300 ring-1 ring-blue-500/20"
-                        : "text-slate-400 hover:bg-white/5 hover:text-slate-200"
-                    }`}
+                        "ALL"
+                      );
+
+                      setCategoryFilter(
+                        "ALL"
+                      );
+                    }}
+                    className="text-[10px] font-medium text-blue-400 transition hover:text-blue-300"
                   >
-
-                    {
-                      filterOption.label
-                    }
-
-
-                    <span className="ml-1.5 text-xs text-slate-500">
-                      ({count})
-                    </span>
-
+                    Clear filters
                   </button>
-                );
-              }
-            )}
+
+                )}
+
+              </div>
+
+
+              <div className="flex flex-wrap gap-2">
+
+                {CATEGORY_FILTERS.map(
+                  (
+                    categoryOption
+                  ) => {
+
+                    const count =
+                      categoryOption.value ===
+                      "ALL"
+                        ? reports.length
+                        : reports.filter(
+                            (
+                              report
+                            ) =>
+                              getReportCategory(
+                                report.reportType
+                              ) ===
+                              categoryOption.value
+                          ).length;
+
+
+                    return (
+                      <button
+                        key={
+                          categoryOption.value
+                        }
+                        type="button"
+                        onClick={() =>
+                          setCategoryFilter(
+                            categoryOption.value
+                          )
+                        }
+                        className={`rounded-lg px-4 py-2 text-sm font-medium transition ${
+                          categoryFilter ===
+                          categoryOption.value
+                            ? "bg-purple-500/15 text-purple-300 ring-1 ring-purple-500/20"
+                            : "text-slate-400 hover:bg-white/5 hover:text-slate-200"
+                        }`}
+                      >
+
+                        {
+                          categoryOption.label
+                        }
+
+
+                        <span className="ml-1.5 text-xs text-slate-500">
+                          ({count})
+                        </span>
+
+                      </button>
+                    );
+                  }
+                )}
+
+              </div>
+
+            </div>
+
+
+            {/* ACTIVE RESULT COUNT */}
+
+            <div className="mt-4 flex flex-wrap items-center justify-between gap-2 border-t border-white/5 pt-4">
+
+              <p className="text-xs text-slate-500">
+                Showing{" "}
+                <span className="font-semibold text-slate-300">
+                  {
+                    filteredReports.length
+                  }
+                </span>{" "}
+                of{" "}
+                {
+                  reports.length
+                }{" "}
+                reports
+              </p>
+
+
+              {categoryFilter !==
+                "ALL" && (
+
+                <span className="rounded-full bg-purple-500/10 px-2.5 py-1 text-[10px] font-semibold text-purple-300 ring-1 ring-purple-500/20">
+                  {
+                    getCategoryLabel(
+                      categoryFilter
+                    )
+                  }
+                </span>
+
+              )}
+
+            </div>
 
           </div>
 
@@ -593,6 +823,9 @@ function ReportsPageContent() {
                 <EmptyState
                   filter={
                     filter
+                  }
+                  categoryFilter={
+                    categoryFilter
                   }
                 />
 
@@ -1091,9 +1324,39 @@ function LoadingState() {
 
 function EmptyState({
   filter,
+  categoryFilter,
 }: {
   filter: FilterTab;
+  categoryFilter:
+    CategoryFilter;
 }) {
+
+  let message =
+    "Citizen reports will appear here when submitted.";
+
+  if (
+    filter !== "ALL" &&
+    categoryFilter !== "ALL"
+  ) {
+    message =
+      `There are currently no ${filter.toLowerCase()} ${getCategoryLabel(
+        categoryFilter
+      ).toLowerCase()} reports.`;
+  } else if (
+    categoryFilter !== "ALL"
+  ) {
+    message =
+      `There are currently no ${getCategoryLabel(
+        categoryFilter
+      ).toLowerCase()} reports.`;
+  } else if (
+    filter !== "ALL"
+  ) {
+    message =
+      `There are currently no ${filter.toLowerCase()} reports.`;
+  }
+
+
   return (
     <div className="col-span-full flex min-h-[250px] items-center justify-center rounded-2xl border border-dashed border-white/10 bg-[#0a1728]">
 
@@ -1108,17 +1371,197 @@ function EmptyState({
 
 
         <p className="mt-1 text-xs text-slate-500">
-
-          {filter === "ALL"
-            ? "Citizen reports will appear here when submitted."
-            : `There are currently no ${filter.toLowerCase()} reports.`}
-
+          {
+            message
+          }
         </p>
 
       </div>
 
     </div>
   );
+}
+
+
+/* ========================================================================= */
+/* CATEGORY HELPERS                                                          */
+/* ========================================================================= */
+
+function getReportCategory(
+  reportType:
+    string
+): CategoryFilter {
+
+  const normalized =
+    reportType
+      .trim()
+      .toLowerCase()
+      .replaceAll(
+        "_",
+        " "
+      )
+      .replaceAll(
+        "-",
+        " "
+      );
+
+
+  if (
+    normalized.includes(
+      "waterlogging"
+    ) ||
+    normalized.includes(
+      "water logging"
+    )
+  ) {
+    return "WATERLOGGING";
+  }
+
+
+  if (
+    normalized.includes(
+      "flood"
+    )
+  ) {
+    return "FLOODING";
+  }
+
+
+  if (
+    normalized.includes(
+      "road blockage"
+    ) ||
+    normalized.includes(
+      "road blocked"
+    ) ||
+    normalized.includes(
+      "blocked road"
+    ) ||
+    normalized.includes(
+      "road block"
+    )
+  ) {
+    return "ROAD_BLOCKAGE";
+  }
+
+
+  if (
+    normalized.includes(
+      "drainage overflow"
+    ) ||
+    normalized.includes(
+      "drain overflow"
+    ) ||
+    normalized.includes(
+      "overflowing drain"
+    )
+  ) {
+    return "DRAINAGE_OVERFLOW";
+  }
+
+
+  if (
+    normalized.includes(
+      "tree fall"
+    ) ||
+    normalized.includes(
+      "fallen tree"
+    ) ||
+    normalized.includes(
+      "tree falling"
+    ) ||
+    (
+      normalized.includes(
+        "tree"
+      ) &&
+      normalized.includes(
+        "fall"
+      )
+    )
+  ) {
+    return "TREE_FALL";
+  }
+
+
+  if (
+    normalized.includes(
+      "electrical hazard"
+    ) ||
+    normalized.includes(
+      "electric hazard"
+    ) ||
+    normalized.includes(
+      "electrical"
+    ) ||
+    normalized.includes(
+      "electric wire"
+    ) ||
+    normalized.includes(
+      "power line"
+    )
+  ) {
+    return "ELECTRICAL_HAZARD";
+  }
+
+
+  if (
+    normalized.includes(
+      "infrastructure damage"
+    ) ||
+    normalized.includes(
+      "structural damage"
+    ) ||
+    normalized.includes(
+      "building damage"
+    ) ||
+    normalized.includes(
+      "road damage"
+    )
+  ) {
+    return "INFRASTRUCTURE_DAMAGE";
+  }
+
+
+  return "OTHER";
+}
+
+
+function getCategoryLabel(
+  category:
+    CategoryFilter
+): string {
+
+  switch (
+    category
+  ) {
+
+    case "WATERLOGGING":
+      return "Waterlogging";
+
+    case "FLOODING":
+      return "Flooding";
+
+    case "ROAD_BLOCKAGE":
+      return "Road Blockage";
+
+    case "DRAINAGE_OVERFLOW":
+      return "Drainage Overflow";
+
+    case "TREE_FALL":
+      return "Tree Fall";
+
+    case "ELECTRICAL_HAZARD":
+      return "Electrical Hazard";
+
+    case "INFRASTRUCTURE_DAMAGE":
+      return "Infrastructure Damage";
+
+    case "OTHER":
+      return "Other";
+
+    default:
+      return "All Categories";
+  }
 }
 
 
