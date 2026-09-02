@@ -22,6 +22,7 @@ import {
   LogIn,
   LogOut,
   MapPin,
+  Navigation,
   Radio,
   Send,
   ShieldCheck,
@@ -105,6 +106,23 @@ const navigationItems:
       "PUBLIC",
       "USER",
       "OFFICER",
+    ],
+  },
+
+
+  {
+    name:
+      "Safe Places",
+
+    icon:
+      Navigation,
+
+    href:
+      "/safe-places",
+
+    roles: [
+      "PUBLIC",
+      "USER",
     ],
   },
 

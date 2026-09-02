@@ -18,6 +18,7 @@ import {
   FileText,
   Info,
   Menu,
+  PhoneCall,
   ShieldAlert,
   X,
 } from "lucide-react";
@@ -41,7 +42,7 @@ const API_BASE_URL =
 
 
 const NOTIFICATION_REFRESH_INTERVAL =
-  4000;
+  30000;
 
 
 /* ========================================================================= */
@@ -181,6 +182,21 @@ export default function Header() {
     );
 
 
+  const notificationFetchInProgress =
+    useRef(
+      false
+    );
+
+  const [
+    sosOpen,
+    setSosOpen,
+  ] =
+    useState(
+      false
+    );
+
+
+
   /* ========================================================================= */
   /* LOAD USER                                                                 */
   /* ========================================================================= */
@@ -211,6 +227,26 @@ export default function Header() {
         silent = false
       ) => {
 
+        if (
+          notificationFetchInProgress.current
+        ) {
+
+          return;
+        }
+
+
+        if (
+          typeof document !==
+            "undefined" &&
+          document.visibilityState ===
+            "hidden" &&
+          silent
+        ) {
+
+          return;
+        }
+
+
         const token =
           getToken();
 
@@ -233,6 +269,25 @@ export default function Header() {
 
           return;
         }
+
+
+        notificationFetchInProgress.current =
+          true;
+
+
+        const controller =
+          new AbortController();
+
+
+        const timeout =
+          window.setTimeout(
+            () => {
+
+              controller.abort();
+
+            },
+            12000
+          );
 
 
         try {
@@ -265,6 +320,9 @@ export default function Header() {
                   {
                     cache:
                       "no-store",
+
+                    signal:
+                      controller.signal,
                   }
                 ),
 
@@ -273,6 +331,9 @@ export default function Header() {
                   {
                     cache:
                       "no-store",
+
+                    signal:
+                      controller.signal,
                   }
                 ),
 
@@ -322,14 +383,6 @@ export default function Header() {
               notificationResponse.status
             );
 
-            setNotifications(
-              []
-            );
-
-            setUnreadCount(
-              0
-            );
-
             return;
           }
 
@@ -341,14 +394,6 @@ export default function Header() {
             console.warn(
               "Unread count API returned:",
               countResponse.status
-            );
-
-            setNotifications(
-              []
-            );
-
-            setUnreadCount(
-              0
             );
 
             return;
@@ -383,20 +428,24 @@ export default function Header() {
           error
         ) {
 
-          console.warn(
-            "Notification service temporarily unavailable:",
-            error
-          );
+          if (
+            error instanceof DOMException &&
+            error.name ===
+              "AbortError"
+          ) {
 
+            console.warn(
+              "Notification request timed out."
+            );
 
-          setNotifications(
-            []
-          );
+          } else {
 
+            console.warn(
+              "Notification service temporarily unavailable:",
+              error
+            );
 
-          setUnreadCount(
-            0
-          );
+          }
 
 
           if (
@@ -411,6 +460,15 @@ export default function Header() {
 
 
         } finally {
+
+          window.clearTimeout(
+            timeout
+          );
+
+
+          notificationFetchInProgress.current =
+            false;
+
 
           if (
             !silent
@@ -453,14 +511,14 @@ export default function Header() {
 
 
       const interval =
-        setInterval(
+        window.setInterval(
           () => {
 
             if (
               !getToken()
             ) {
 
-              clearInterval(
+              window.clearInterval(
                 interval
               );
 
@@ -468,19 +526,55 @@ export default function Header() {
             }
 
 
-            fetchNotifications(
-              true
-            );
+            if (
+              document.visibilityState ===
+                "visible"
+            ) {
+
+              fetchNotifications(
+                true
+              );
+
+            }
 
           },
           NOTIFICATION_REFRESH_INTERVAL
         );
 
 
+      function handleVisibilityChange() {
+
+        if (
+          document.visibilityState ===
+            "visible" &&
+          getToken()
+        ) {
+
+          fetchNotifications(
+            true
+          );
+
+        }
+
+      }
+
+
+      document.addEventListener(
+        "visibilitychange",
+        handleVisibilityChange
+      );
+
+
       return () => {
 
-        clearInterval(
+        window.clearInterval(
           interval
+        );
+
+
+        document.removeEventListener(
+          "visibilitychange",
+          handleVisibilityChange
         );
 
       };
@@ -1003,6 +1097,23 @@ export default function Header() {
 
 
           {/* ================================================================= */}
+          {/* SOS EMERGENCY ACCESS                                               */}
+          {/* ================================================================= */}
+
+          <button
+            type="button"
+            onClick={() => setSosOpen(true)}
+            aria-label="Open emergency SOS contacts"
+            className="flex h-10 items-center justify-center gap-2 rounded-xl border border-red-500/30 bg-red-500/10 px-3 text-red-300 transition hover:border-red-400/50 hover:bg-red-500/20 hover:text-red-200"
+          >
+            <PhoneCall className="h-4 w-4" />
+            <span className="hidden text-xs font-black tracking-wider sm:inline">
+              SOS
+            </span>
+          </button>
+
+
+          {/* ================================================================= */}
           {/* NOTIFICATIONS                                                     */}
           {/* ================================================================= */}
 
@@ -1338,8 +1449,93 @@ export default function Header() {
 
       </div>
 
+      {sosOpen && (
+        <div
+          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) {
+              setSosOpen(false);
+            }
+          }}
+        >
+          <div className="w-full max-w-md overflow-hidden rounded-2xl border border-red-500/25 bg-[#081423] shadow-[0_30px_100px_rgba(0,0,0,0.7)]">
+            <div className="flex items-start justify-between border-b border-white/10 p-5">
+              <div className="flex items-center gap-3">
+                <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-red-500/15">
+                  <PhoneCall className="h-5 w-5 text-red-400" />
+                </div>
+                <div>
+                  <p className="text-lg font-black text-white">Emergency SOS</p>
+                  <p className="mt-1 text-xs text-slate-500">
+                    Tap a number to call for immediate help.
+                  </p>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setSosOpen(false)}
+                aria-label="Close emergency contacts"
+                className="flex h-9 w-9 items-center justify-center rounded-lg text-slate-500 transition hover:bg-white/5 hover:text-white"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="space-y-3 p-5">
+              <EmergencyContact label="National Emergency" description="Integrated emergency response" number="112" />
+              <EmergencyContact label="Police" description="Police emergency assistance" number="112" />
+              <EmergencyContact label="Ambulance" description="Emergency medical assistance" number="108" />
+              <EmergencyContact label="Fire & Rescue" description="Fire and rescue emergency" number="112" />
+              <EmergencyContact label="Disaster Management" description="National disaster helpline" number="1078" />
+            </div>
+
+            <div className="border-t border-white/5 bg-red-500/[0.035] px-5 py-4">
+              <div className="flex gap-3">
+                <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-400" />
+                <p className="text-[10px] leading-5 text-slate-500">
+                  Use emergency numbers only for genuine emergencies. If one service is unavailable, call 112 for integrated emergency assistance.
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
     </header>
 
+  );
+}
+
+
+/* ========================================================================= */
+/* EMERGENCY CONTACT                                                         */
+/* ========================================================================= */
+
+function EmergencyContact({
+  label,
+  description,
+  number,
+}: {
+  label: string;
+  description: string;
+  number: string;
+}) {
+  return (
+    <a
+      href={`tel:${number}`}
+      className="group flex items-center justify-between rounded-xl border border-white/5 bg-white/[0.025] p-4 transition hover:border-red-500/25 hover:bg-red-500/[0.06]"
+    >
+      <div>
+        <p className="text-sm font-semibold text-white">{label}</p>
+        <p className="mt-1 text-[10px] text-slate-500">{description}</p>
+      </div>
+
+      <div className="flex items-center gap-2 rounded-lg bg-red-500/10 px-3 py-2 text-red-300 transition group-hover:bg-red-500/20">
+        <PhoneCall className="h-3.5 w-3.5" />
+        <span className="text-sm font-black">{number}</span>
+      </div>
+    </a>
   );
 }
 
