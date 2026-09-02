@@ -260,7 +260,9 @@ export default function Home() {
         if (
           fetchInProgress.current
         ) {
+
           return;
+
         }
 
 
@@ -270,7 +272,9 @@ export default function Home() {
           document.visibilityState ===
             "hidden"
         ) {
+
           return;
+
         }
 
 
@@ -278,193 +282,300 @@ export default function Home() {
           true;
 
 
-        const controller =
-          new AbortController();
-
-
-        const timeout =
-          window.setTimeout(
-            () => {
-              controller.abort();
-            },
-            15000
-          );
+        let wardsSucceeded =
+          false;
 
 
         try {
 
-          const [
-            wardsResponse,
-            statusResponse,
-          ] =
-            await Promise.all(
-              [
-                fetch(
+          /* ================================================================ */
+          /* FETCH WARD DATA                                                   */
+          /* ================================================================ */
+
+          try {
+
+            const wardsController =
+              new AbortController();
+
+
+            const wardsTimeout =
+              window.setTimeout(
+                () => {
+
+                  wardsController.abort();
+
+                },
+                15000
+              );
+
+
+            try {
+
+              const wardsResponse =
+                await fetch(
                   `${API_BASE_URL}/api/wards`,
                   {
                     cache:
                       "no-store",
 
                     signal:
-                      controller.signal,
+                      wardsController.signal,
                   }
-                ),
+                );
 
-                fetch(
+
+              if (
+                !wardsResponse.ok
+              ) {
+
+                throw new Error(
+                  `Ward API returned ${wardsResponse.status}`
+                );
+
+              }
+
+
+              const wards:
+                BackendWard[] =
+                await wardsResponse.json();
+
+
+              if (
+                !Array.isArray(
+                  wards
+                )
+              ) {
+
+                throw new Error(
+                  "Ward API returned invalid data."
+                );
+
+              }
+
+
+              setBackendWards(
+                wards
+              );
+
+
+              const readings:
+                WardReading[] =
+                wards.map(
+                  (
+                    ward
+                  ) => ({
+
+                    ward:
+                      ward.ward as WardReading["ward"],
+
+                    rainfallMm:
+                      ward.rainfallMm,
+
+                    riverLevelCm:
+                      ward.riverLevelCm,
+
+                    reportCount:
+                      ward.verifiedReportCount ??
+                      ward.reportCount ??
+                      0,
+
+                  })
+                );
+
+
+              const evaluated =
+                evaluateAllWards(
+                  readings
+                );
+
+
+              setWardRisks(
+                evaluated
+              );
+
+
+              setSelectedWard(
+                (
+                  current
+                ) => {
+
+                  if (
+                    !current
+                  ) {
+
+                    return null;
+
+                  }
+
+
+                  return (
+                    evaluated.find(
+                      (
+                        ward
+                      ) =>
+                        ward.ward ===
+                        current.ward
+                    ) ??
+                    null
+                  );
+
+                }
+              );
+
+
+              wardsSucceeded =
+                true;
+
+
+              setBackendOnline(
+                true
+              );
+
+
+              setLastUpdated(
+                new Date()
+              );
+
+            } finally {
+
+              window.clearTimeout(
+                wardsTimeout
+              );
+
+            }
+
+          } catch (
+            error
+          ) {
+
+            if (
+              error instanceof DOMException &&
+              error.name ===
+                "AbortError"
+            ) {
+
+              console.warn(
+                "Ward request timed out."
+              );
+
+            } else {
+
+              console.error(
+                "Ward data fetch failed:",
+                error
+              );
+
+            }
+
+
+            setBackendOnline(
+              false
+            );
+
+          }
+
+
+          /* ================================================================ */
+          /* FETCH SYSTEM STATUS                                               */
+          /* ================================================================ */
+
+          try {
+
+            const statusController =
+              new AbortController();
+
+
+            const statusTimeout =
+              window.setTimeout(
+                () => {
+
+                  statusController.abort();
+
+                },
+                10000
+              );
+
+
+            try {
+
+              const statusResponse =
+                await fetch(
                   `${API_BASE_URL}/api/system-status`,
                   {
                     cache:
                       "no-store",
 
                     signal:
-                      controller.signal,
+                      statusController.signal,
                   }
-                ),
-              ]
-            );
+                );
 
-
-          if (
-            !wardsResponse.ok
-          ) {
-
-            throw new Error(
-              `Ward API returned ${wardsResponse.status}`
-            );
-
-          }
-
-
-          const wards:
-            BackendWard[] =
-            await wardsResponse.json();
-
-
-          setBackendWards(
-            wards
-          );
-
-
-          const readings:
-            WardReading[] =
-            wards.map(
-              (
-                ward
-              ) => ({
-
-                ward:
-                  ward.ward as WardReading["ward"],
-
-                rainfallMm:
-                  ward.rainfallMm,
-
-                riverLevelCm:
-                  ward.riverLevelCm,
-
-                reportCount:
-                  ward.reportCount,
-
-              })
-            );
-
-
-          const evaluated =
-            evaluateAllWards(
-              readings
-            );
-
-
-          setWardRisks(
-            evaluated
-          );
-
-
-          setSelectedWard(
-            (
-              current
-            ) => {
 
               if (
-                !current
+                !statusResponse.ok
               ) {
-                return null;
+
+                throw new Error(
+                  `System status API returned ${statusResponse.status}`
+                );
+
               }
 
 
-              return (
-                evaluated.find(
-                  (
-                    ward
-                  ) =>
-                    ward.ward ===
-                    current.ward
-                ) ??
-                null
+              const status:
+                SystemStatusResponse =
+                await statusResponse.json();
+
+
+              setSystemStatus(
+                status
+              );
+
+
+              if (
+                !wardsSucceeded
+              ) {
+
+                setBackendOnline(
+                  true
+                );
+
+              }
+
+            } finally {
+
+              window.clearTimeout(
+                statusTimeout
               );
 
             }
-          );
 
-
-          if (
-            statusResponse.ok
+          } catch (
+            error
           ) {
 
-            const status:
-              SystemStatusResponse =
-              await statusResponse.json();
+            if (
+              error instanceof DOMException &&
+              error.name ===
+                "AbortError"
+            ) {
 
+              console.warn(
+                "System-status request timed out."
+              );
 
-            setSystemStatus(
-              status
-            );
+            } else {
 
-          }
+              console.warn(
+                "System-status fetch failed:",
+                error
+              );
 
-
-          setBackendOnline(
-            true
-          );
-
-
-          setLastUpdated(
-            new Date()
-          );
-
-        } catch (
-          error
-        ) {
-
-          if (
-            error instanceof DOMException &&
-            error.name ===
-              "AbortError"
-          ) {
-
-            console.warn(
-              "Dashboard request timed out."
-            );
-
-          } else {
-
-            console.error(
-              "Dashboard data fetch failed:",
-              error
-            );
+            }
 
           }
-
-
-          setBackendOnline(
-            false
-          );
 
         } finally {
-
-          window.clearTimeout(
-            timeout
-          );
-
 
           fetchInProgress.current =
             false;
