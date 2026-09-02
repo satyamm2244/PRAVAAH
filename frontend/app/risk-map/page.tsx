@@ -4,6 +4,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
 
@@ -93,7 +94,7 @@ const API_BASE_URL =
 
 
 const REFRESH_INTERVAL =
-  4000;
+  30000;
 
 
 /* ========================================================================= */
@@ -101,6 +102,12 @@ const REFRESH_INTERVAL =
 /* ========================================================================= */
 
 export default function RiskMapPage() {
+
+  const fetchInProgress =
+    useRef(
+      false
+    );
+
 
   /* ----------------------------------------------------------------------- */
   /* STATE                                                                   */
@@ -187,6 +194,45 @@ export default function RiskMapPage() {
         showRefresh = false
       ) => {
 
+        if (
+          fetchInProgress.current
+        ) {
+
+          return;
+        }
+
+
+        if (
+          typeof document !==
+            "undefined" &&
+          document.visibilityState ===
+            "hidden" &&
+          !showRefresh
+        ) {
+
+          return;
+        }
+
+
+        fetchInProgress.current =
+          true;
+
+
+        const controller =
+          new AbortController();
+
+
+        const timeout =
+          window.setTimeout(
+            () => {
+
+              controller.abort();
+
+            },
+            15000
+          );
+
+
         try {
 
           if (
@@ -206,6 +252,9 @@ export default function RiskMapPage() {
               {
                 cache:
                   "no-store",
+
+                signal:
+                  controller.signal,
               }
             );
 
@@ -226,18 +275,10 @@ export default function RiskMapPage() {
             await response.json();
 
 
-          /* ---------------------------------------------------------------- */
-          /* STORE FULL BACKEND WARD DATA                                     */
-          /* ---------------------------------------------------------------- */
-
           setBackendWards(
             backendData
           );
 
-
-          /* ---------------------------------------------------------------- */
-          /* CONVERT BACKEND DATA TO RISK ENGINE FORMAT                       */
-          /* ---------------------------------------------------------------- */
 
           const readings:
             WardReading[] =
@@ -262,10 +303,6 @@ export default function RiskMapPage() {
             );
 
 
-          /* ---------------------------------------------------------------- */
-          /* CALCULATE RISKS                                                  */
-          /* ---------------------------------------------------------------- */
-
           const risks =
             evaluateAllWards(
               readings
@@ -276,10 +313,6 @@ export default function RiskMapPage() {
             risks
           );
 
-
-          /* ---------------------------------------------------------------- */
-          /* KEEP CURRENT SELECTION LIVE                                      */
-          /* ---------------------------------------------------------------- */
 
           setSelectedWard(
             (
@@ -318,17 +351,43 @@ export default function RiskMapPage() {
           fetchError
         ) {
 
-          console.error(
-            "Unable to fetch ward risk data:",
-            fetchError
-          );
+          if (
+            fetchError instanceof DOMException &&
+            fetchError.name ===
+              "AbortError"
+          ) {
 
+            console.warn(
+              "Risk map request timed out."
+            );
 
-          setError(
-            "Unable to connect to the PRAVAAH backend."
-          );
+            setError(
+              "The PRAVAAH backend took too long to respond."
+            );
+
+          } else {
+
+            console.error(
+              "Unable to fetch ward risk data:",
+              fetchError
+            );
+
+            setError(
+              "Unable to connect to the PRAVAAH backend."
+            );
+
+          }
 
         } finally {
+
+          window.clearTimeout(
+            timeout
+          );
+
+
+          fetchInProgress.current =
+            false;
+
 
           setLoading(
             false
@@ -357,20 +416,53 @@ export default function RiskMapPage() {
 
 
       const interval =
-        setInterval(
+        window.setInterval(
           () => {
 
-            fetchWardRisks();
+            if (
+              document.visibilityState ===
+              "visible"
+            ) {
+
+              fetchWardRisks();
+
+            }
 
           },
           REFRESH_INTERVAL
         );
 
 
+      function handleVisibilityChange() {
+
+        if (
+          document.visibilityState ===
+          "visible"
+        ) {
+
+          fetchWardRisks();
+
+        }
+
+      }
+
+
+      document.addEventListener(
+        "visibilitychange",
+        handleVisibilityChange
+      );
+
+
       return () => {
 
-        clearInterval(
+        window.clearInterval(
           interval
+        );
+
+
+        document.removeEventListener(
+          "visibilitychange",
+          handleVisibilityChange
         );
 
       };
@@ -580,7 +672,7 @@ export default function RiskMapPage() {
                 </span>
 
 
-                Live • 4 sec refresh
+                Live • 30 sec refresh
 
               </div>
 
