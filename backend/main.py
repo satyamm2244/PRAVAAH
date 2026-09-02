@@ -6,11 +6,11 @@ from fastapi import (
     Form,
     Depends,
 )
-from create_officer import create_officer
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from sqlalchemy.orm import Session
+
 from pydantic import BaseModel
 
 import json
@@ -48,11 +48,8 @@ from auth import (
     user_to_dict,
 )
 
-from emergency_assistant import generate_emergency_response
-
-from risk_engine import (
-    assess_ward_hazards,
-    build_hazard_summary,
+from emergency_assistant import (
+    generate_emergency_response,
 )
 
 
@@ -60,15 +57,9 @@ from risk_engine import (
 # DATABASE INITIALIZATION
 # =============================================================================
 
-Base.metadata.create_all(bind=engine)
-
-try:
-    create_officer()
-except Exception as error:
-    print(
-        "Officer bootstrap failed:",
-        error,
-    )
+Base.metadata.create_all(
+    bind=engine
+)
 
 
 # =============================================================================
@@ -92,9 +83,7 @@ app.add_middleware(
         "http://localhost:3000",
         "http://127.0.0.1:3000",
         "http://192.168.1.27:3000",
-        "https://pravaah-delta.vercel.app",
     ],
-    allow_origin_regex=r"https://.*\.vercel\.app",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -106,11 +95,16 @@ app.add_middleware(
 # =============================================================================
 
 SIMULATION_UPDATE_SECONDS = 4
+
 WEATHER_REFRESH_SECONDS = 300
 
-OPEN_METEO_URL = "https://api.open-meteo.com/v1/forecast"
+OPEN_METEO_URL = (
+    "https://api.open-meteo.com/v1/forecast"
+)
 
-INDIA_TIMEZONE = ZoneInfo("Asia/Kolkata")
+INDIA_TIMEZONE = ZoneInfo(
+    "Asia/Kolkata"
+)
 
 UPLOAD_DIR = "uploads"
 
@@ -120,18 +114,25 @@ ALLOWED_IMAGE_TYPES = {
     "image/webp",
 }
 
-MAX_IMAGE_SIZE = 5 * 1024 * 1024
+MAX_IMAGE_SIZE = (
+    5 * 1024 * 1024
+)
 
 
 # =============================================================================
 # CREATE UPLOAD DIRECTORY
 # =============================================================================
 
-os.makedirs(UPLOAD_DIR, exist_ok=True)
+os.makedirs(
+    UPLOAD_DIR,
+    exist_ok=True,
+)
 
 app.mount(
     "/uploads",
-    StaticFiles(directory=UPLOAD_DIR),
+    StaticFiles(
+        directory=UPLOAD_DIR
+    ),
     name="uploads",
 )
 
@@ -141,29 +142,62 @@ app.mount(
 # =============================================================================
 
 def create_initial_state():
+
     state = {}
 
     for ward_id in WARD_COORDINATES:
+
         state[ward_id] = {
-            "rainfallMm": random.randint(10, 50),
-            "riverLevelCm": random.randint(5, 35),
-            "reportCount": 0,
+
+            "rainfallMm":
+                random.randint(
+                    10,
+                    50,
+                ),
+
+            "riverLevelCm":
+                random.randint(
+                    5,
+                    35,
+                ),
+
+            "reportCount":
+                0,
         }
 
+    # Demo river-level conditions
+
     if "W14" in state:
-        state["W14"]["riverLevelCm"] = 42
+        state[
+            "W14"
+        ][
+            "riverLevelCm"
+        ] = 42
 
     if "W58" in state:
-        state["W58"]["riverLevelCm"] = 34
+        state[
+            "W58"
+        ][
+            "riverLevelCm"
+        ] = 34
 
     if "W32" in state:
-        state["W32"]["riverLevelCm"] = 29
+        state[
+            "W32"
+        ][
+            "riverLevelCm"
+        ] = 29
 
     return state
 
 
-WARD_STATE = create_initial_state()
-LAST_SIMULATION_UPDATE = time.time()
+WARD_STATE = (
+    create_initial_state()
+)
+
+LAST_SIMULATION_UPDATE = (
+    time.time()
+)
 
 
 # =============================================================================
@@ -171,21 +205,35 @@ LAST_SIMULATION_UPDATE = time.time()
 # =============================================================================
 
 REAL_RAINFALL = {}
+
 LAST_WEATHER_UPDATE = 0
+
 WEATHER_AVAILABLE = False
+
 WEATHER_ERROR = None
 
 
+
+
 # =============================================================================
-# REQUEST MODELS
+# EMERGENCY ASSISTANT REQUEST MODEL
 # =============================================================================
 
-class EmergencyAssistantRequest(BaseModel):
+class EmergencyAssistantRequest(
+    BaseModel
+):
     message: str
     ward: str
 
 
-class AlertCreateRequest(BaseModel):
+
+# =============================================================================
+# ALERT REQUEST MODEL
+# =============================================================================
+
+class AlertCreateRequest(
+    BaseModel
+):
     id: str
     ward: str
     priority: str
@@ -200,16 +248,40 @@ class AlertCreateRequest(BaseModel):
     createdAt: int
 
 
+
+
 # =============================================================================
 # GENERAL HELPERS
 # =============================================================================
 
-def clamp(value, minimum, maximum):
-    return max(minimum, min(maximum, value))
+def clamp(
+    value,
+    minimum,
+    maximum,
+):
+
+    return max(
+        minimum,
+        min(
+            maximum,
+            value,
+        ),
+    )
 
 
-def drift_value(value, change, minimum, maximum):
-    movement = random.randint(-change, change)
+def drift_value(
+    value,
+    change,
+    minimum,
+    maximum,
+):
+
+    movement = (
+        random.randint(
+            -change,
+            change,
+        )
+    )
 
     return clamp(
         value + movement,
@@ -218,1036 +290,145 @@ def drift_value(value, change, minimum, maximum):
     )
 
 
-def normalize_ward(ward_id: str):
-    ward_id = ward_id.upper()
+def normalize_ward(
+    ward_id: str,
+):
 
-    if ward_id not in WARD_COORDINATES:
+    ward_id = (
+        ward_id.upper()
+    )
+
+    if (
+        ward_id
+        not in WARD_COORDINATES
+    ):
+
         raise HTTPException(
             status_code=404,
-            detail=f"Ward {ward_id} not found",
+            detail=(
+                f"Ward {ward_id} not found"
+            ),
         )
 
     return ward_id
 
 
 # =============================================================================
-# ALERT POLICY
+# DATABASE REPORT HELPERS
 # =============================================================================
 
-ALERT_LEVEL_RANK = {
-    "NORMAL": 0,
-    "WATCH": 1,
-    "HIGH": 2,
-    "CRITICAL": 3,
-}
-
-ALERT_PRIORITY_BY_LEVEL = {
-    "WATCH": "MEDIUM",
-    "HIGH": "HIGH",
-    "CRITICAL": "CRITICAL",
-}
-
-ALERT_COOLDOWN_MINUTES = 30
-ALERT_CANDIDATE_BUCKET_MINUTES = 15
-
-
-def normalize_hazard_type(hazard_type: str):
-    clean_hazard = (
-        (hazard_type or "UNKNOWN")
-        .strip()
-        .upper()
-        .replace("-", "_")
-        .replace(" ", "_")
-    )
-
-    aliases = {
-        "WEATHER": "SEVERE_WEATHER",
-        "SEVEREWEATHER": "SEVERE_WEATHER",
-        "EARTHQUAKE": "SEISMIC",
-        "STRUCTURAL": "INFRASTRUCTURE",
-    }
-
-    return aliases.get(
-        clean_hazard,
-        clean_hazard,
-    )
-
-
-def get_published_alert_for_ward_hazard(
-    ward_id: str,
-    hazard_type: str,
-    db: Session,
+def report_to_dict(
+    report: IncidentReport,
 ):
-    clean_hazard = normalize_hazard_type(
-        hazard_type
-    )
-
-    return (
-        db.query(Alert)
-        .filter(
-            Alert.ward == ward_id,
-            Alert.primary_hazard == clean_hazard,
-            Alert.status == "PUBLISHED",
-        )
-        .order_by(
-            Alert.published_at.desc()
-        )
-        .first()
-    )
-
-
-def get_recent_dismissed_alert_for_ward_hazard(
-    ward_id: str,
-    hazard_type: str,
-    db: Session,
-):
-    cutoff = (
-        int(time.time() * 1000)
-        - ALERT_COOLDOWN_MINUTES * 60 * 1000
-    )
-
-    clean_hazard = normalize_hazard_type(
-        hazard_type
-    )
-
-    return (
-        db.query(Alert)
-        .filter(
-            Alert.ward == ward_id,
-            Alert.primary_hazard == clean_hazard,
-            Alert.status == "DISMISSED",
-            Alert.dismissed_at.isnot(None),
-            Alert.dismissed_at >= cutoff,
-        )
-        .order_by(
-            Alert.dismissed_at.desc()
-        )
-        .first()
-    )
-
-
-def build_alert_candidate_id(
-    ward_id: str,
-    hazard_type: str,
-    now_ms: int,
-):
-    bucket_ms = (
-        ALERT_CANDIDATE_BUCKET_MINUTES
-        * 60
-        * 1000
-    )
-
-    bucket = now_ms // bucket_ms
-
-    clean_hazard = (
-        normalize_hazard_type(hazard_type)
-        .lower()
-        .replace("_", "-")
-    )
-
-    return (
-        f"candidate-{ward_id.lower()}-"
-        f"{clean_hazard}-{bucket}"
-    )
-
-
-def candidate_uses_only_stale_physical_evidence(
-    hazard: dict,
-):
-    evidence = hazard.get(
-        "evidence",
-        [],
-    )
-
-    if not evidence:
-        return False
-
-    physical = [
-        item
-        for item in evidence
-        if item.get("sourceType")
-        != "CITIZEN_REPORT"
-    ]
-
-    if not physical:
-        return False
-
-    return all(
-        item.get(
-            "freshness",
-            {},
-        ).get("status")
-        in {
-            "STALE",
-            "VERY_STALE",
-        }
-        for item in physical
-    )
-
-
-def build_alert_candidate(
-    ward_id: str,
-    hazard: dict,
-    now_ms: int,
-):
-    hazard_type = normalize_hazard_type(
-        hazard.get(
-            "hazardType",
-            "UNKNOWN",
-        )
-    )
-
-    level = (
-        hazard.get(
-            "riskLevel",
-            "NORMAL",
-        )
-        .strip()
-        .upper()
-    )
-
-    risk = int(
-        hazard.get(
-            "riskScore",
-            0,
-        )
-    )
-
-    confidence = int(
-        hazard.get(
-            "confidenceScore",
-            0,
-        )
-    )
-
-    affected_area = hazard.get(
-        "affectedArea",
-        {
-            "primaryWard": ward_id,
-            "scope": "WARD",
-            "description": ward_id,
-        },
-    )
-
-    area_description = (
-        affected_area.get(
-            "description"
-        )
-        or ward_id
-    )
-
-    citizen_actions = hazard.get(
-        "citizenActions",
-        [],
-    )
-
-    recommended_action = (
-        citizen_actions[0]
-        if citizen_actions
-        else "Follow official emergency instructions."
-    )
-
-    stale_only = (
-        candidate_uses_only_stale_physical_evidence(
-            hazard
-        )
-    )
 
     return {
-        "id": build_alert_candidate_id(
-            ward_id,
-            hazard_type,
-            now_ms,
-        ),
-        "ward": ward_id,
-        "priority":
-            ALERT_PRIORITY_BY_LEVEL.get(
-                level,
-                "MEDIUM",
-            ),
-        "trigger":
-            "MULTI_HAZARD_FUSION",
-        "level":
-            level,
-        "title": (
-            f"{hazard_type.replace('_', ' ').title()} "
-            f"Alert - {ward_id}"
-        ),
-        "message": (
-            f"{level} "
-            f"{hazard_type.replace('_', ' ').lower()} "
-            f"risk detected for {area_description}. "
-            f"Risk score {risk}/100 with "
-            f"{confidence}% confidence."
-        ),
-        "risk":
-            risk,
-        "confidence":
-            confidence,
-        "primaryHazard":
-            hazard_type,
-        "recommendedAction":
-            recommended_action,
+
+        "id":
+            report.id,
+
+        "reporterUserId":
+            report.reporter_user_id,
+
+        "ward":
+            report.ward,
+
+        "reportType":
+            report.report_type,
+
+        "severity":
+            report.severity,
+
+        "description":
+            report.description,
+
+        "latitude":
+            report.latitude,
+
+        "longitude":
+            report.longitude,
+
+        "photoUrl":
+            report.photo_url,
+
+        "status":
+            report.status,
+
         "createdAt":
-            now_ms,
-        "affectedArea":
-            affected_area,
-        "evidence":
-            hazard.get(
-                "evidence",
-                [],
-            ),
-        "evidenceCount":
-            hazard.get(
-                "evidenceCount",
-                0,
-            ),
-        "citizenActions":
-            citizen_actions,
-        "officerActions":
-            hazard.get(
-                "officerActions",
-                [],
-            ),
-        "dataFreshness":
-            hazard.get(
-                "dataFreshness",
-                {},
-            ),
-        "staleOnlyPhysicalEvidence":
-            stale_only,
-        "publishRecommended":
-            not stale_only,
-        "source":
-            "MULTI_HAZARD_ENGINE",
-        "candidateAction":
-            (
-                "OFFICER_REVIEW_STALE"
-                if stale_only
-                else "NEW"
-            ),
+            report.created_at,
+
+        "verifiedAt":
+            report.verified_at,
     }
 
+
+
 # =============================================================================
-# ALERT CANDIDATES
+# ALERT SERIALIZER
 # =============================================================================
 
-@app.get("/api/alerts/candidates")
-def get_alert_candidates(
-    db: Session = Depends(get_db),
-    current_officer=Depends(require_officer),
+def alert_to_dict(
+    alert: Alert,
 ):
-    update_simulation()
-    fetch_real_rainfall()
-
-    candidates = []
-
-    suppressed_duplicates = 0
-    suppressed_cooldown = 0
-    escalation_candidates = 0
-    stale_review_candidates = 0
-
-    now_ms = int(
-        time.time() * 1000
-    )
-
-    for ward_id in WARD_COORDINATES:
-        ward_data = build_ward_response(
-            ward_id,
-            db,
-        )
-
-        multi_hazard = ward_data.get(
-            "multiHazard",
-            {},
-        )
-
-        hazards = multi_hazard.get(
-            "hazards",
-            [],
-        )
-
-        for hazard in hazards:
-            level = (
-                hazard.get(
-                    "riskLevel",
-                    "NORMAL",
-                )
-                .strip()
-                .upper()
-            )
-
-            if level == "NORMAL":
-                continue
-
-            hazard_type = normalize_hazard_type(
-                hazard.get(
-                    "hazardType",
-                    "UNKNOWN",
-                )
-            )
-
-            existing_published = (
-                get_published_alert_for_ward_hazard(
-                    ward_id=ward_id,
-                    hazard_type=hazard_type,
-                    db=db,
-                )
-            )
-
-            if existing_published is not None:
-                incoming_rank = (
-                    ALERT_LEVEL_RANK.get(
-                        level,
-                        0,
-                    )
-                )
-
-                existing_rank = (
-                    ALERT_LEVEL_RANK.get(
-                        (
-                            existing_published.level
-                            or "NORMAL"
-                        )
-                        .strip()
-                        .upper(),
-                        0,
-                    )
-                )
-
-                if incoming_rank <= existing_rank:
-                    suppressed_duplicates += 1
-                    continue
-
-            recent_dismissed = (
-                get_recent_dismissed_alert_for_ward_hazard(
-                    ward_id=ward_id,
-                    hazard_type=hazard_type,
-                    db=db,
-                )
-            )
-
-            if recent_dismissed is not None:
-                suppressed_cooldown += 1
-                continue
-
-            candidate = build_alert_candidate(
-                ward_id,
-                hazard,
-                now_ms,
-            )
-
-            if existing_published is not None:
-                candidate[
-                    "candidateAction"
-                ] = "ESCALATE"
-
-                candidate[
-                    "existingAlertId"
-                ] = existing_published.id
-
-                candidate[
-                    "existingLevel"
-                ] = existing_published.level
-
-                escalation_candidates += 1
-
-            elif (
-                candidate[
-                    "candidateAction"
-                ]
-                == "OFFICER_REVIEW_STALE"
-            ):
-                stale_review_candidates += 1
-
-            candidates.append(
-                candidate
-            )
-
-    candidates.sort(
-        key=lambda item: (
-            ALERT_LEVEL_RANK.get(
-                item.get(
-                    "level",
-                    "NORMAL",
-                ),
-                0,
-            ),
-            item.get(
-                "risk",
-                0,
-            ),
-            item.get(
-                "confidence",
-                0,
-            ),
-        ),
-        reverse=True,
-    )
 
     return {
-        "count":
-            len(candidates),
-        "suppressedDuplicates":
-            suppressed_duplicates,
-        "suppressedCooldown":
-            suppressed_cooldown,
-        "escalationCandidates":
-            escalation_candidates,
-        "staleReviewCandidates":
-            stale_review_candidates,
-        "cooldownMinutes":
-            ALERT_COOLDOWN_MINUTES,
-        "candidateBucketMinutes":
-            ALERT_CANDIDATE_BUCKET_MINUTES,
-        "generatedAt":
-            int(time.time() * 1000),
-        "candidates":
-            candidates,
+
+        "id":
+            alert.id,
+
+        "ward":
+            alert.ward,
+
+        "priority":
+            alert.priority,
+
+        "trigger":
+            alert.trigger,
+
+        "level":
+            alert.level,
+
+        "title":
+            alert.title,
+
+        "message":
+            alert.message,
+
+        "risk":
+            alert.risk,
+
+        "confidence":
+            alert.confidence,
+
+        "primaryHazard":
+            alert.primary_hazard,
+
+        "recommendedAction":
+            alert.recommended_action,
+
+        "status":
+            alert.status,
+
+        "publishedBy":
+            alert.published_by,
+
+        "createdAt":
+            alert.created_at,
+
+        "publishedAt":
+            alert.published_at,
+
+        "dismissedAt":
+            alert.dismissed_at,
     }
 
 
 # =============================================================================
-# ALERT HISTORY
+# NOTIFICATION SERIALIZER
 # =============================================================================
 
-@app.get("/api/alerts/history/all")
-def get_alert_history(
-    db: Session = Depends(get_db),
-    current_officer=Depends(require_officer),
+def notification_to_dict(
+    notification: Notification,
 ):
-    alerts = (
-        db.query(Alert)
-        .order_by(
-            Alert.created_at.desc()
-        )
-        .all()
-    )
-
-    return [
-        alert_to_dict(alert)
-        for alert in alerts
-    ]
-
-# =============================================================================
-# CREATE / PUBLISH ALERT
-# =============================================================================
-
-@app.post(
-    "/api/alerts",
-    status_code=201,
-)
-def publish_alert(
-    request: AlertCreateRequest,
-    db: Session = Depends(get_db),
-    current_officer=Depends(require_officer),
-):
-    ward_id = normalize_ward(
-        request.ward
-    )
-
-    existing_alert = (
-        db.query(Alert)
-        .filter(
-            Alert.id == request.id
-        )
-        .first()
-    )
-
-    if existing_alert:
-        raise HTTPException(
-            status_code=409,
-            detail="Alert already exists.",
-        )
-
-    clean_primary_hazard = (
-        normalize_hazard_type(
-            request.primaryHazard
-        )
-    )
-
-    incoming_level = (
-        request.level
-        .strip()
-        .upper()
-    )
-
-    if incoming_level not in ALERT_LEVEL_RANK:
-        raise HTTPException(
-            status_code=400,
-            detail="Invalid alert level.",
-        )
-
-    duplicate_published_alert = (
-        get_published_alert_for_ward_hazard(
-            ward_id=ward_id,
-            hazard_type=clean_primary_hazard,
-            db=db,
-        )
-    )
-
-    if duplicate_published_alert is not None:
-        existing_level = (
-            duplicate_published_alert.level
-            or "NORMAL"
-        ).strip().upper()
-
-        incoming_rank = ALERT_LEVEL_RANK.get(
-            incoming_level,
-            0,
-        )
-
-        existing_rank = ALERT_LEVEL_RANK.get(
-            existing_level,
-            0,
-        )
-
-        if incoming_rank <= existing_rank:
-            raise HTTPException(
-                status_code=409,
-                detail={
-                    "message": (
-                        "An active published alert already exists "
-                        "for this ward and hazard at the same or "
-                        "higher severity."
-                    ),
-                    "existingAlertId":
-                        duplicate_published_alert.id,
-                    "ward":
-                        ward_id,
-                    "primaryHazard":
-                        clean_primary_hazard,
-                    "existingLevel":
-                        existing_level,
-                    "incomingLevel":
-                        incoming_level,
-                },
-            )
-
-        duplicate_published_alert.priority = (
-            request.priority
-            .strip()
-            .upper()
-        )
-        duplicate_published_alert.trigger = (
-            request.trigger
-            .strip()
-            .upper()
-        )
-        duplicate_published_alert.level = (
-            incoming_level
-        )
-        duplicate_published_alert.title = (
-            request.title.strip()
-        )
-        duplicate_published_alert.message = (
-            request.message.strip()
-        )
-        duplicate_published_alert.risk = (
-            request.risk
-        )
-        duplicate_published_alert.confidence = (
-            request.confidence
-        )
-        duplicate_published_alert.recommended_action = (
-            request.recommendedAction.strip()
-        )
-        duplicate_published_alert.primary_hazard = (
-            clean_primary_hazard
-        )
-
-        try:
-            create_notification(
-                db=db,
-                recipient_role="USER",
-                notification_type="ALERT",
-                severity=incoming_level,
-                title=(
-                    "Alert Escalated: "
-                    f"{request.title.strip()}"
-                ),
-                message=request.message.strip(),
-                ward=ward_id,
-                action_type="VIEW_ALERT",
-                action_target=
-                    duplicate_published_alert.id,
-            )
-
-            db.commit()
-            db.refresh(
-                duplicate_published_alert
-            )
-
-        except Exception as error:
-            db.rollback()
-            print(
-                "Unable to escalate alert:",
-                error,
-            )
-            raise HTTPException(
-                status_code=500,
-                detail="Unable to escalate alert.",
-            )
-
-        return alert_to_dict(
-            duplicate_published_alert
-        )
-
-    now = int(
-        time.time() * 1000
-    )
-
-    alert = Alert(
-        id=request.id,
-        ward=ward_id,
-        priority=
-            request.priority.strip().upper(),
-        trigger=
-            request.trigger.strip().upper(),
-        level=
-            incoming_level,
-        title=
-            request.title.strip(),
-        message=
-            request.message.strip(),
-        risk=
-            request.risk,
-        confidence=
-            request.confidence,
-        primary_hazard=
-            clean_primary_hazard,
-        recommended_action=
-            request.recommendedAction.strip(),
-        status="PUBLISHED",
-        published_by=
-            getattr(
-                current_officer,
-                "id",
-                None,
-            ),
-        created_at=
-            request.createdAt,
-        published_at=
-            now,
-        dismissed_at=
-            None,
-    )
-
-    try:
-        db.add(alert)
-
-        create_notification(
-            db=db,
-            recipient_role="USER",
-            notification_type="ALERT",
-            severity=incoming_level,
-            title=request.title,
-            message=request.message,
-            ward=ward_id,
-            action_type="VIEW_ALERT",
-            action_target=request.id,
-        )
-
-        db.commit()
-        db.refresh(alert)
-
-    except Exception as error:
-        db.rollback()
-        print(
-            "Unable to publish alert:",
-            error,
-        )
-        raise HTTPException(
-            status_code=500,
-            detail="Unable to publish alert.",
-        )
-
-    return alert_to_dict(
-        alert
-    )
-
-
-# =============================================================================
-# GET PUBLIC PUBLISHED ALERTS
-# =============================================================================
-
-@app.get("/api/alerts")
-def get_published_alerts(
-    db: Session = Depends(get_db),
-):
-    alerts = (
-        db.query(Alert)
-        .filter(
-            Alert.status == "PUBLISHED"
-        )
-        .order_by(
-            Alert.published_at.desc()
-        )
-        .all()
-    )
-
-    return [
-        alert_to_dict(alert)
-        for alert in alerts
-    ]
-
-
-# =============================================================================
-# DISMISS ALERT
-# =============================================================================
-
-@app.patch(
-    "/api/alerts/{alert_id}/dismiss"
-)
-def dismiss_alert(
-    alert_id: str,
-    db: Session = Depends(get_db),
-    current_officer=Depends(require_officer),
-):
-    alert = (
-        db.query(Alert)
-        .filter(
-            Alert.id == alert_id
-        )
-        .first()
-    )
-
-    if alert is None:
-        raise HTTPException(
-            status_code=404,
-            detail="Alert not found.",
-        )
-
-    if alert.status == "DISMISSED":
-        return alert_to_dict(
-            alert
-        )
-
-    alert.status = "DISMISSED"
-
-    alert.dismissed_at = int(
-        time.time() * 1000
-    )
-
-    try:
-        db.commit()
-
-        db.refresh(
-            alert
-        )
-
-    except Exception as error:
-        db.rollback()
-
-        print(
-            "Unable to dismiss alert:",
-            error,
-        )
-
-        raise HTTPException(
-            status_code=500,
-            detail="Unable to dismiss alert.",
-        )
-
-    return alert_to_dict(
-        alert
-    )
-
-# =============================================================================
-# DISMISS ALERT CANDIDATE
-# =============================================================================
-
-@app.post("/api/alerts/candidates/{candidate_id}/dismiss")
-def dismiss_alert_candidate(
-    candidate_id: str,
-    ward: str,
-    hazard: str,
-    level: str,
-    risk: int,
-    confidence: int,
-    db: Session = Depends(get_db),
-    current_officer=Depends(require_officer),
-):
-    ward_id = normalize_ward(
-        ward
-    )
-
-    clean_hazard = normalize_hazard_type(
-        hazard
-    )
-
-    clean_level = (
-        level
-        .strip()
-        .upper()
-    )
-
-    if clean_level not in ALERT_LEVEL_RANK:
-        raise HTTPException(
-            status_code=400,
-            detail="Invalid alert level.",
-        )
-
-    existing = (
-        db.query(Alert)
-        .filter(
-            Alert.id == candidate_id
-        )
-        .first()
-    )
-
-    if existing is not None:
-        if existing.status == "DISMISSED":
-            return alert_to_dict(
-                existing
-            )
-
-        raise HTTPException(
-            status_code=409,
-            detail="Candidate ID already exists.",
-        )
-
-    active_alert = (
-        get_published_alert_for_ward_hazard(
-            ward_id=ward_id,
-            hazard_type=clean_hazard,
-            db=db,
-        )
-    )
-
-    if active_alert is not None:
-        raise HTTPException(
-            status_code=409,
-            detail={
-                "message": (
-                    "A published alert already exists "
-                    "for this ward and hazard."
-                ),
-                "existingAlertId":
-                    active_alert.id,
-            },
-        )
-
-    now = int(
-        time.time() * 1000
-    )
-
-    dismissed_candidate = Alert(
-        id=candidate_id,
-        ward=ward_id,
-        priority=
-            ALERT_PRIORITY_BY_LEVEL.get(
-                clean_level,
-                "MEDIUM",
-            ),
-        trigger="MULTI_HAZARD_FUSION",
-        level=clean_level,
-        title=(
-            f"{clean_hazard.replace('_', ' ').title()} "
-            f"Candidate - {ward_id}"
-        ),
-        message=(
-            "Alert candidate dismissed "
-            "during officer review."
-        ),
-        risk=int(
-            clamp(
-                risk,
-                0,
-                100,
-            )
-        ),
-        confidence=int(
-            clamp(
-                confidence,
-                0,
-                100,
-            )
-        ),
-        primary_hazard=
-            clean_hazard,
-        recommended_action=
-            "Officer reviewed and dismissed this candidate.",
-        status="DISMISSED",
-        published_by=
-            getattr(
-                current_officer,
-                "id",
-                None,
-            ),
-        created_at=now,
-        published_at=now,
-        dismissed_at=now,
-    )
-
-    try:
-        db.add(
-            dismissed_candidate
-        )
-        db.commit()
-        db.refresh(
-            dismissed_candidate
-        )
-
-    except Exception as error:
-        db.rollback()
-        print(
-            "Unable to dismiss alert candidate:",
-            error,
-        )
-        raise HTTPException(
-            status_code=500,
-            detail="Unable to dismiss alert candidate.",
-        )
-
-    return alert_to_dict(
-        dismissed_candidate
-    )
-
-
-# =============================================================================
-# SERIALIZERS
-# =============================================================================
-
-def report_to_dict(report: IncidentReport):
-    return {
-        "id": report.id,
-        "reporterUserId": report.reporter_user_id,
-        "ward": report.ward,
-        "reportType": report.report_type,
-        "severity": report.severity,
-        "description": report.description,
-        "latitude": report.latitude,
-        "longitude": report.longitude,
-        "photoUrl": report.photo_url,
-        "status": report.status,
-        "createdAt": report.created_at,
-        "verifiedAt": report.verified_at,
-    }
-
-
-def alert_to_dict(alert: Alert):
-    return {
-        "id": alert.id,
-        "ward": alert.ward,
-        "priority": alert.priority,
-        "trigger": alert.trigger,
-        "level": alert.level,
-        "title": alert.title,
-        "message": alert.message,
-        "risk": alert.risk,
-        "confidence": alert.confidence,
-        "primaryHazard": alert.primary_hazard,
-        "recommendedAction": alert.recommended_action,
-        "status": alert.status,
-        "publishedBy": alert.published_by,
-        "createdAt": alert.created_at,
-        "publishedAt": alert.published_at,
-        "dismissedAt": alert.dismissed_at,
-    }
-
-
-def notification_to_dict(notification: Notification):
     return {
         "id": notification.id,
         "recipientRole": notification.recipient_role,
@@ -1265,24 +446,8 @@ def notification_to_dict(notification: Notification):
     }
 
 
-def sensor_to_dict(reading: SensorReading):
-    return {
-        "id": reading.id,
-        "sensorId": reading.sensor_id,
-        "ward": reading.ward,
-        "sensorType": reading.sensor_type,
-        "value": reading.value,
-        "unit": reading.unit,
-        "latitude": reading.latitude,
-        "longitude": reading.longitude,
-        "status": reading.status,
-        "source": reading.source,
-        "timestamp": reading.timestamp,
-    }
-
-
 # =============================================================================
-# NOTIFICATION HELPER
+# CREATE NOTIFICATION HELPER
 # =============================================================================
 
 def create_notification(
@@ -1314,143 +479,198 @@ def create_notification(
     )
 
     db.add(notification)
-
     return notification
 
 
+
 # =============================================================================
-# REPORT HELPERS
+# VERIFIED REPORT COUNT
 # =============================================================================
 
-def count_verified_reports(ward_id: str, db: Session):
+def count_verified_reports(
+    ward_id: str,
+    db: Session,
+):
+
     return (
-        db.query(IncidentReport)
+        db.query(
+            IncidentReport
+        )
         .filter(
-            IncidentReport.ward == ward_id,
-            IncidentReport.status == "VERIFIED",
+            IncidentReport.ward
+            == ward_id,
+
+            IncidentReport.status
+            == "VERIFIED",
         )
         .count()
     )
 
+
+# =============================================================================
+# WARD REPORT STATUS COUNT
+# =============================================================================
 
 def count_ward_reports_by_status(
     ward_id: str,
     status: str,
     db: Session,
 ):
+
     return (
-        db.query(IncidentReport)
+        db.query(
+            IncidentReport
+        )
         .filter(
-            IncidentReport.ward == ward_id,
-            IncidentReport.status == status,
+            IncidentReport.ward
+            == ward_id,
+
+            IncidentReport.status
+            == status,
         )
         .count()
     )
 
 
-def count_total_ward_reports(ward_id: str, db: Session):
-    return (
-        db.query(IncidentReport)
-        .filter(IncidentReport.ward == ward_id)
-        .count()
-    )
+# =============================================================================
+# TOTAL REPORTS FOR WARD
+# =============================================================================
 
-
-def count_reports_by_status(db: Session, status: str):
-    return (
-        db.query(IncidentReport)
-        .filter(IncidentReport.status == status)
-        .count()
-    )
-
-
-def get_ward_report_breakdown(ward_id: str, db: Session):
-    return {
-        "verified": count_verified_reports(ward_id, db),
-        "pending": count_ward_reports_by_status(
-            ward_id,
-            "PENDING",
-            db,
-        ),
-        "rejected": count_ward_reports_by_status(
-            ward_id,
-            "REJECTED",
-            db,
-        ),
-        "total": count_total_ward_reports(ward_id, db),
-    }
-
-def get_verified_ward_reports(
+def count_total_ward_reports(
     ward_id: str,
     db: Session,
 ):
-    reports = (
-        db.query(IncidentReport)
+
+    return (
+        db.query(
+            IncidentReport
+        )
         .filter(
-            IncidentReport.ward == ward_id,
-            IncidentReport.status == "VERIFIED",
+            IncidentReport.ward
+            == ward_id
         )
-        .order_by(
-            IncidentReport.created_at.desc()
-        )
-        .all()
+        .count()
     )
 
-    return [
-        report_to_dict(report)
-        for report in reports
-    ]
+
+# =============================================================================
+# GLOBAL REPORT STATUS COUNT
+# =============================================================================
+
+def count_reports_by_status(
+    db: Session,
+    status: str,
+):
+
+    return (
+        db.query(
+            IncidentReport
+        )
+        .filter(
+            IncidentReport.status
+            == status
+        )
+        .count()
+    )
+
+
+# =============================================================================
+# WARD REPORT BREAKDOWN
+# =============================================================================
+
+def get_ward_report_breakdown(
+    ward_id: str,
+    db: Session,
+):
+
+    verified = (
+        count_verified_reports(
+            ward_id,
+            db,
+        )
+    )
+
+    pending = (
+        count_ward_reports_by_status(
+            ward_id,
+            "PENDING",
+            db,
+        )
+    )
+
+    rejected = (
+        count_ward_reports_by_status(
+            ward_id,
+            "REJECTED",
+            db,
+        )
+    )
+
+    total = (
+        count_total_ward_reports(
+            ward_id,
+            db,
+        )
+    )
+
+    return {
+
+        "verified":
+            verified,
+
+        "pending":
+            pending,
+
+        "rejected":
+            rejected,
+
+        "total":
+            total,
+    }
+
 
 
 # =============================================================================
 # SENSOR HELPERS
 # =============================================================================
 
+def sensor_to_dict(reading: SensorReading):
+    return {
+        "id": reading.id,
+        "sensorId": reading.sensor_id,
+        "ward": reading.ward,
+        "sensorType": reading.sensor_type,
+        "value": reading.value,
+        "unit": reading.unit,
+        "latitude": reading.latitude,
+        "longitude": reading.longitude,
+        "status": reading.status,
+        "source": reading.source,
+        "timestamp": reading.timestamp,
+    }
+
+
 def validate_sensor_type(sensor_type: str):
     clean_type = sensor_type.strip().upper()
-
     allowed_types = {
-        # Existing hydrological sensors
         "RIVER_LEVEL",
         "WATER_LEVEL",
         "RAINFALL",
         "DRAIN_LEVEL",
-
-        # Severe weather
-        "WIND_SPEED",
-
-        # Fire
-        "SMOKE",
-        "FIRE_RISK",
-
-        # Seismic
-        "SEISMIC_INTENSITY",
-
-        # Infrastructure
-        "INFRASTRUCTURE_STRESS",
     }
 
     if clean_type not in allowed_types:
         raise HTTPException(
             status_code=400,
-            detail=(
-                "sensorType must be one of: "
-                "RIVER_LEVEL, WATER_LEVEL, RAINFALL, DRAIN_LEVEL, "
-                "WIND_SPEED, SMOKE, FIRE_RISK, "
-                "SEISMIC_INTENSITY, or INFRASTRUCTURE_STRESS."
-            ),
+            detail="sensorType must be RIVER_LEVEL, WATER_LEVEL, RAINFALL, or DRAIN_LEVEL.",
         )
 
     return clean_type
 
+
 def validate_sensor_status(status: str):
     clean_status = status.strip().upper()
-
-    allowed_statuses = {
-        "ONLINE",
-        "OFFLINE",
-        "MAINTENANCE",
-    }
+    allowed_statuses = {"ONLINE", "OFFLINE", "MAINTENANCE"}
 
     if clean_status not in allowed_statuses:
         raise HTTPException(
@@ -1460,37 +680,56 @@ def validate_sensor_status(status: str):
 
     return clean_status
 
-
 # =============================================================================
 # SIMULATION UPDATE
 # =============================================================================
 
 def update_simulation():
+
     global LAST_SIMULATION_UPDATE
 
     now = time.time()
 
-    if now - LAST_SIMULATION_UPDATE < SIMULATION_UPDATE_SECONDS:
+    if (
+        now
+        - LAST_SIMULATION_UPDATE
+        < SIMULATION_UPDATE_SECONDS
+    ):
         return
 
     for ward_id in WARD_STATE:
-        current = WARD_STATE[ward_id]
 
-        current["rainfallMm"] = drift_value(
-            current["rainfallMm"],
+        current = (
+            WARD_STATE[
+                ward_id
+            ]
+        )
+
+        current[
+            "rainfallMm"
+        ] = drift_value(
+            current[
+                "rainfallMm"
+            ],
             change=4,
             minimum=0,
             maximum=150,
         )
 
-        current["riverLevelCm"] = drift_value(
-            current["riverLevelCm"],
+        current[
+            "riverLevelCm"
+        ] = drift_value(
+            current[
+                "riverLevelCm"
+            ],
             change=3,
             minimum=-20,
             maximum=80,
         )
 
-    LAST_SIMULATION_UPDATE = now
+    LAST_SIMULATION_UPDATE = (
+        now
+    )
 
 
 # =============================================================================
@@ -1498,6 +737,7 @@ def update_simulation():
 # =============================================================================
 
 def fetch_real_rainfall():
+
     global REAL_RAINFALL
     global LAST_WEATHER_UPDATE
     global WEATHER_AVAILABLE
@@ -1508,172 +748,357 @@ def fetch_real_rainfall():
     if (
         WEATHER_AVAILABLE
         and REAL_RAINFALL
-        and now - LAST_WEATHER_UPDATE < WEATHER_REFRESH_SECONDS
+        and (
+            now
+            - LAST_WEATHER_UPDATE
+            < WEATHER_REFRESH_SECONDS
+        )
     ):
         return
 
     try:
-        ward_ids = list(WARD_COORDINATES.keys())
+
+        ward_ids = list(
+            WARD_COORDINATES.keys()
+        )
 
         latitudes = ",".join(
-            str(WARD_COORDINATES[ward_id]["latitude"])
-            for ward_id in ward_ids
+            str(
+                WARD_COORDINATES[
+                    ward_id
+                ][
+                    "latitude"
+                ]
+            )
+            for ward_id
+            in ward_ids
         )
 
         longitudes = ",".join(
-            str(WARD_COORDINATES[ward_id]["longitude"])
-            for ward_id in ward_ids
+            str(
+                WARD_COORDINATES[
+                    ward_id
+                ][
+                    "longitude"
+                ]
+            )
+            for ward_id
+            in ward_ids
         )
 
         parameters = {
-            "latitude": latitudes,
-            "longitude": longitudes,
-            "hourly": "precipitation",
-            "forecast_days": 1,
-            "timezone": "Asia/Kolkata",
-            "precipitation_unit": "mm",
+
+            "latitude":
+                latitudes,
+
+            "longitude":
+                longitudes,
+
+            "hourly":
+                "precipitation",
+
+            "forecast_days":
+                1,
+
+            "timezone":
+                "Asia/Kolkata",
+
+            "precipitation_unit":
+                "mm",
         }
 
-        request_url = OPEN_METEO_URL + "?" + urlencode(parameters)
+        request_url = (
+            OPEN_METEO_URL
+            + "?"
+            + urlencode(
+                parameters
+            )
+        )
 
         request = Request(
             request_url,
             headers={
-                "User-Agent": "PRAVAAH-SIH-Prototype/1.0"
+                "User-Agent":
+                    "PRAVAAH-SIH-Prototype/1.0"
             },
         )
 
-        with urlopen(request, timeout=12) as response:
+        with urlopen(
+            request,
+            timeout=12,
+        ) as response:
+
             payload = json.loads(
-                response.read().decode("utf-8")
+                response
+                .read()
+                .decode(
+                    "utf-8"
+                )
             )
 
-        if not isinstance(payload, list):
-            payload = [payload]
+        if not isinstance(
+            payload,
+            list,
+        ):
+
+            payload = [
+                payload
+            ]
 
         current_hour = (
-            datetime.now(INDIA_TIMEZONE)
+            datetime.now(
+                INDIA_TIMEZONE
+            )
             .replace(
                 minute=0,
                 second=0,
                 microsecond=0,
             )
-            .strftime("%Y-%m-%dT%H:%M")
+            .strftime(
+                "%Y-%m-%dT%H:%M"
+            )
         )
 
         rainfall_result = {}
 
-        for index, ward_id in enumerate(ward_ids):
-            if index >= len(payload):
+        for (
+            index,
+            ward_id,
+        ) in enumerate(
+            ward_ids
+        ):
+
+            if (
+                index
+                >= len(payload)
+            ):
                 continue
 
-            weather_data = payload[index]
+            weather_data = (
+                payload[index]
+            )
 
-            hourly = weather_data.get("hourly", {})
-            times = hourly.get("time", [])
-            precipitation = hourly.get("precipitation", [])
+            hourly = (
+                weather_data.get(
+                    "hourly",
+                    {},
+                )
+            )
+
+            times = (
+                hourly.get(
+                    "time",
+                    [],
+                )
+            )
+
+            precipitation = (
+                hourly.get(
+                    "precipitation",
+                    [],
+                )
+            )
 
             if not times:
                 continue
 
             try:
-                hour_index = times.index(current_hour)
+
+                hour_index = (
+                    times.index(
+                        current_hour
+                    )
+                )
 
             except ValueError:
-                current_local_hour = datetime.now(
-                    INDIA_TIMEZONE
-                ).hour
+
+                current_local_hour = (
+                    datetime.now(
+                        INDIA_TIMEZONE
+                    ).hour
+                )
 
                 hour_index = min(
                     current_local_hour,
                     len(times) - 1,
                 )
 
-            if hour_index >= len(precipitation):
+            if (
+                hour_index
+                >= len(
+                    precipitation
+                )
+            ):
                 continue
 
-            rain_value = precipitation[hour_index]
+            rain_value = (
+                precipitation[
+                    hour_index
+                ]
+            )
 
-            if rain_value is None:
+            if (
+                rain_value
+                is None
+            ):
                 rain_value = 0
 
-            rainfall_result[ward_id] = round(
-                float(rain_value),
+            rainfall_result[
+                ward_id
+            ] = round(
+                float(
+                    rain_value
+                ),
                 2,
             )
 
         if rainfall_result:
-            REAL_RAINFALL = rainfall_result
-            WEATHER_AVAILABLE = True
+
+            REAL_RAINFALL = (
+                rainfall_result
+            )
+
+            WEATHER_AVAILABLE = (
+                True
+            )
+
             WEATHER_ERROR = None
-            LAST_WEATHER_UPDATE = now
+
+            LAST_WEATHER_UPDATE = (
+                now
+            )
 
         else:
+
             raise RuntimeError(
                 "Open-Meteo returned no usable rainfall data."
             )
 
     except Exception as error:
+
         print(
             "Open-Meteo rainfall fetch failed:",
             error,
         )
 
-        WEATHER_AVAILABLE = False
-        WEATHER_ERROR = str(error)
+        WEATHER_AVAILABLE = (
+            False
+        )
+
+        WEATHER_ERROR = str(
+            error
+        )
 
 
-def get_rainfall(ward_id: str):
+# =============================================================================
+# RAINFALL VALUE
+# =============================================================================
+
+def get_rainfall(
+    ward_id: str,
+):
+
     if (
         WEATHER_AVAILABLE
-        and ward_id in REAL_RAINFALL
+        and ward_id
+        in REAL_RAINFALL
     ):
-        return REAL_RAINFALL[ward_id]
 
-    return WARD_STATE[ward_id]["rainfallMm"]
+        return (
+            REAL_RAINFALL[
+                ward_id
+            ]
+        )
+
+    return (
+        WARD_STATE[
+            ward_id
+        ][
+            "rainfallMm"
+        ]
+    )
 
 
 # =============================================================================
 # SAVE PHOTO
 # =============================================================================
 
-async def save_photo(photo: UploadFile | None):
+async def save_photo(
+    photo: UploadFile | None,
+):
+
     if photo is None:
         return None
 
-    if photo.content_type not in ALLOWED_IMAGE_TYPES:
+    if (
+        photo.content_type
+        not in ALLOWED_IMAGE_TYPES
+    ):
+
         raise HTTPException(
             status_code=400,
-            detail="Photo must be JPEG, PNG, or WEBP.",
+            detail=(
+                "Photo must be JPEG, PNG, or WEBP."
+            ),
         )
 
-    file_bytes = await photo.read()
+    file_bytes = (
+        await photo.read()
+    )
 
-    if len(file_bytes) > MAX_IMAGE_SIZE:
+    if (
+        len(file_bytes)
+        > MAX_IMAGE_SIZE
+    ):
+
         raise HTTPException(
             status_code=400,
-            detail="Photo size must be under 5 MB.",
+            detail=(
+                "Photo size must be under 5 MB."
+            ),
         )
 
     extension_map = {
-        "image/jpeg": ".jpg",
-        "image/png": ".png",
-        "image/webp": ".webp",
+
+        "image/jpeg":
+            ".jpg",
+
+        "image/png":
+            ".png",
+
+        "image/webp":
+            ".webp",
     }
 
-    extension = extension_map[photo.content_type]
-
-    filename = f"{uuid.uuid4()}{extension}"
-
-    filepath = os.path.join(
-        UPLOAD_DIR,
-        filename,
+    extension = (
+        extension_map[
+            photo.content_type
+        ]
     )
 
-    with open(filepath, "wb") as output_file:
-        output_file.write(file_bytes)
+    filename = (
+        f"{uuid.uuid4()}{extension}"
+    )
 
-    return f"/uploads/{filename}"
+    filepath = (
+        os.path.join(
+            UPLOAD_DIR,
+            filename,
+        )
+    )
+
+    with open(
+        filepath,
+        "wb",
+    ) as output_file:
+
+        output_file.write(
+            file_bytes
+        )
+
+    return (
+        f"/uploads/{filename}"
+    )
 
 
 
@@ -1681,22 +1106,24 @@ async def save_photo(photo: UploadFile | None):
 # LATEST ONLINE RIVER SENSOR
 # =============================================================================
 
-def get_latest_online_sensor(
+def get_latest_online_river_sensor(
     ward_id: str,
-    sensor_type: str,
     db: Session,
 ):
-    """
-    Return the newest ONLINE reading for a specific
-    sensor type in a ward.
-    """
 
     return (
-        db.query(SensorReading)
+        db.query(
+            SensorReading
+        )
         .filter(
-            SensorReading.ward == ward_id,
-            SensorReading.sensor_type == sensor_type,
-            SensorReading.status == "ONLINE",
+            SensorReading.ward
+            == ward_id,
+
+            SensorReading.sensor_type
+            == "RIVER_LEVEL",
+
+            SensorReading.status
+            == "ONLINE",
         )
         .order_by(
             SensorReading.timestamp.desc()
@@ -1704,62 +1131,54 @@ def get_latest_online_sensor(
         .first()
     )
 
-
-def get_latest_online_river_sensor(
-    ward_id: str,
-    db: Session,
-):
-    """Backward-compatible helper for existing river-level logic."""
-
-    return get_latest_online_sensor(
-        ward_id=ward_id,
-        sensor_type="RIVER_LEVEL",
-        db=db,
-    )
+# =============================================================================
+# BUILD WARD RESPONSE
+# =============================================================================
 
 def build_ward_response(
     ward_id: str,
     db: Session,
 ):
-    # =========================================================================
-    # BASE WARD INFORMATION
-    # =========================================================================
 
-    coordinates = WARD_COORDINATES[
-        ward_id
-    ]
-
-    reading = WARD_STATE[
-        ward_id
-    ]
-
-
-    # =========================================================================
-    # RAINFALL
-    # =========================================================================
-
-    rainfall = get_rainfall(
-        ward_id
+    coordinates = (
+        WARD_COORDINATES[
+            ward_id
+        ]
     )
 
+    reading = (
+        WARD_STATE[
+            ward_id
+        ]
+    )
+
+    rainfall = (
+        get_rainfall(
+            ward_id
+        )
+    )
 
     rainfall_source = (
         "Open-Meteo weather model"
         if WEATHER_AVAILABLE
-        else "Simulated weather fallback"
+        else
+        "Simulated weather fallback"
     )
-
 
     rainfall_mode = (
         "REAL"
         if WEATHER_AVAILABLE
-        else "SIMULATED"
+        else
+        "SIMULATED"
     )
 
-
-    # =========================================================================
-    # RIVER LEVEL
-    # =========================================================================
+    # -------------------------------------------------------------------------
+    # RIVER LEVEL SOURCE
+    # -------------------------------------------------------------------------
+    #
+    # Prefer the newest ONLINE IoT RIVER_LEVEL reading for this ward.
+    # If no deployed sensor reading exists, keep the current simulation
+    # as a prototype fallback.
 
     latest_river_sensor = (
         get_latest_online_river_sensor(
@@ -1768,28 +1187,23 @@ def build_ward_response(
         )
     )
 
-
     if latest_river_sensor is not None:
 
-        river_level = float(
-            latest_river_sensor.value
+        river_level = (
+            float(
+                latest_river_sensor.value
+            )
         )
-
 
         river_level_source = (
             latest_river_sensor.sensor_id
         )
 
-
-        river_level_mode = (
-            "IOT"
-        )
-
+        river_level_mode = "IOT"
 
         river_level_timestamp = (
             latest_river_sensor.timestamp
         )
-
 
     else:
 
@@ -1799,74 +1213,15 @@ def build_ward_response(
             ]
         )
 
-
         river_level_source = (
             "Simulated river sensor fallback"
         )
-
 
         river_level_mode = (
             "SIMULATED"
         )
 
-
-        river_level_timestamp = (
-            None
-        )
-
-
-    # =========================================================================
-    # MULTI-HAZARD SENSOR OBSERVATIONS
-    # =========================================================================
-
-    latest_wind_sensor = get_latest_online_sensor(
-        ward_id,
-        "WIND_SPEED",
-        db,
-    )
-
-    latest_fire_sensor = get_latest_online_sensor(
-        ward_id,
-        "FIRE_RISK",
-        db,
-    )
-
-    latest_smoke_sensor = get_latest_online_sensor(
-        ward_id,
-        "SMOKE",
-        db,
-    )
-
-    latest_seismic_sensor = get_latest_online_sensor(
-        ward_id,
-        "SEISMIC_INTENSITY",
-        db,
-    )
-
-    latest_infrastructure_sensor = get_latest_online_sensor(
-        ward_id,
-        "INFRASTRUCTURE_STRESS",
-        db,
-    )
-
-    def sensor_value(sensor):
-        if sensor is None:
-            return None
-
-        return float(sensor.value)
-
-    wind_speed_kmh = sensor_value(latest_wind_sensor)
-    fire_risk_index = sensor_value(latest_fire_sensor)
-    smoke_level = sensor_value(latest_smoke_sensor)
-    seismic_intensity = sensor_value(latest_seismic_sensor)
-    infrastructure_stress = sensor_value(
-        latest_infrastructure_sensor
-    )
-
-
-    # =========================================================================
-    # REPORT INFORMATION
-    # =========================================================================
+        river_level_timestamp = None
 
     report_breakdown = (
         get_ward_report_breakdown(
@@ -1875,6 +1230,11 @@ def build_ward_response(
         )
     )
 
+    # IMPORTANT:
+    # reportCount is VERIFIED reports only.
+    #
+    # This is the field consumed by
+    # the existing frontend risk engine.
 
     verified_report_count = (
         report_breakdown[
@@ -1882,38 +1242,16 @@ def build_ward_response(
         ]
     )
 
-
     reading[
         "reportCount"
-    ] = verified_report_count
-
-
-    # Get the actual verified report objects.
-    #
-    # The old system only needed the number of reports.
-    # Multi-hazard fusion needs report type, severity,
-    # description, and verification information.
-    verified_reports = (
-        get_verified_ward_reports(
-            ward_id,
-            db,
-        )
+    ] = (
+        verified_report_count
     )
 
-
-    # =========================================================================
-    # BASE WARD RESPONSE
-    # =========================================================================
-
-    ward_response = {
+    return {
 
         "ward":
             ward_id,
-
-
-        # ---------------------------------------------------------------------
-        # EXISTING ENVIRONMENTAL DATA
-        # ---------------------------------------------------------------------
 
         "rainfallMm":
             rainfall,
@@ -1921,32 +1259,16 @@ def build_ward_response(
         "riverLevelCm":
             river_level,
 
-        # ---------------------------------------------------------------------
-        # MULTI-HAZARD SENSOR VALUES
-        # ---------------------------------------------------------------------
-
-        "windSpeedKmh":
-            wind_speed_kmh,
-
-        "fireRiskIndex":
-            fire_risk_index,
-
-        "smokeLevel":
-            smoke_level,
-
-        "seismicIntensity":
-            seismic_intensity,
-
-        "infrastructureStress":
-            infrastructure_stress,
-
-
-        # ---------------------------------------------------------------------
-        # EXISTING REPORT COUNTS
-        # ---------------------------------------------------------------------
+        # ---------------------------------------------------------------
+        # RISK ENGINE REPORT VALUE
+        # ---------------------------------------------------------------
 
         "reportCount":
             verified_report_count,
+
+        # ---------------------------------------------------------------
+        # FULL EVIDENCE BREAKDOWN
+        # ---------------------------------------------------------------
 
         "verifiedReportCount":
             report_breakdown[
@@ -1968,10 +1290,9 @@ def build_ward_response(
                 "total"
             ],
 
-
-        # ---------------------------------------------------------------------
-        # LOCATION
-        # ---------------------------------------------------------------------
+        # ---------------------------------------------------------------
+        # REAL COORDINATES
+        # ---------------------------------------------------------------
 
         "latitude":
             coordinates[
@@ -1983,18 +1304,8 @@ def build_ward_response(
                 "longitude"
             ],
 
-
-        # ---------------------------------------------------------------------
-        # DATA MODE
-        # ---------------------------------------------------------------------
-
         "dataMode":
             "HYBRID",
-
-
-        # ---------------------------------------------------------------------
-        # DATA SOURCES
-        # ---------------------------------------------------------------------
 
         "sources": {
 
@@ -2013,107 +1324,12 @@ def build_ward_response(
             "riverLevelTimestamp":
                 river_level_timestamp,
 
-            "windSpeed": (
-                latest_wind_sensor.sensor_id
-                if latest_wind_sensor
-                else None
-            ),
-
-            "windSpeedMode": (
-                latest_wind_sensor.source
-                if latest_wind_sensor
-                else None
-            ),
-
-            "windSpeedTimestamp": (
-                latest_wind_sensor.timestamp
-                if latest_wind_sensor
-                else None
-            ),
-
-            "fireRisk": (
-                latest_fire_sensor.sensor_id
-                if latest_fire_sensor
-                else None
-            ),
-
-            "fireRiskMode": (
-                latest_fire_sensor.source
-                if latest_fire_sensor
-                else None
-            ),
-
-            "fireRiskTimestamp": (
-                latest_fire_sensor.timestamp
-                if latest_fire_sensor
-                else None
-            ),
-
-            "smoke": (
-                latest_smoke_sensor.sensor_id
-                if latest_smoke_sensor
-                else None
-            ),
-
-            "smokeMode": (
-                latest_smoke_sensor.source
-                if latest_smoke_sensor
-                else None
-            ),
-
-            "smokeTimestamp": (
-                latest_smoke_sensor.timestamp
-                if latest_smoke_sensor
-                else None
-            ),
-
-            "seismic": (
-                latest_seismic_sensor.sensor_id
-                if latest_seismic_sensor
-                else None
-            ),
-
-            "seismicMode": (
-                latest_seismic_sensor.source
-                if latest_seismic_sensor
-                else None
-            ),
-
-            "seismicTimestamp": (
-                latest_seismic_sensor.timestamp
-                if latest_seismic_sensor
-                else None
-            ),
-
-            "infrastructure": (
-                latest_infrastructure_sensor.sensor_id
-                if latest_infrastructure_sensor
-                else None
-            ),
-
-            "infrastructureMode": (
-                latest_infrastructure_sensor.source
-                if latest_infrastructure_sensor
-                else None
-            ),
-
-            "infrastructureTimestamp": (
-                latest_infrastructure_sensor.timestamp
-                if latest_infrastructure_sensor
-                else None
-            ),
-
             "crowdReports":
                 "Human-verified citizen reports",
 
             "crowdReportsMode":
                 "REAL",
         },
-
-
-        # ---------------------------------------------------------------------
-        # TIMESTAMP
-        # ---------------------------------------------------------------------
 
         "timestamp":
             int(
@@ -2123,104 +1339,11 @@ def build_ward_response(
     }
 
 
-    # =========================================================================
-    # MULTI-HAZARD FUSION
-    # =========================================================================
 
-    fusion_result = (
-        assess_ward_hazards(
-            ward_data=
-                ward_response,
-
-            verified_reports=
-                verified_reports,
-        )
-    )
-
-
-    # =========================================================================
-    # LIGHTWEIGHT SUMMARY
-    # =========================================================================
-
-    hazard_summary = (
-        build_hazard_summary(
-            fusion_result
-        )
-    )
-
-
-    # =========================================================================
-    # BACKWARD-COMPATIBLE TOP-LEVEL FIELDS
-    # =========================================================================
-    #
-    # Existing frontend code can continue using rainfallMm,
-    # riverLevelCm, reportCount, etc.
-    #
-    # New frontend code can use these additional fields.
-
-    ward_response[
-        "primaryHazard"
-    ] = hazard_summary[
-        "primaryHazard"
-    ]
-
-
-    ward_response[
-        "riskScore"
-    ] = hazard_summary[
-        "riskScore"
-    ]
-
-
-    ward_response[
-        "riskLevel"
-    ] = hazard_summary[
-        "riskLevel"
-    ]
-
-
-    ward_response[
-        "confidenceScore"
-    ] = hazard_summary[
-        "confidenceScore"
-    ]
-
-
-    ward_response[
-        "confidenceLevel"
-    ] = hazard_summary[
-        "confidenceLevel"
-    ]
-
-
-    ward_response[
-        "activeHazardCount"
-    ] = hazard_summary[
-        "activeHazardCount"
-    ]
-
-
-    ward_response[
-        "activeHazards"
-    ] = hazard_summary[
-        "activeHazards"
-    ]
-
-
-    # =========================================================================
-    # FULL MULTI-HAZARD INTELLIGENCE
-    # =========================================================================
-
-    ward_response[
-        "multiHazard"
-    ] = fusion_result
-
-
-    return ward_response
 
 
 # =============================================================================
-# EMERGENCY ASSISTANT RISK ENGINE
+# EMERGENCY ASSISTANT RISK ENGINE 2.0
 # =============================================================================
 
 WATCH_RAIN_MM = 30
@@ -2244,84 +1367,150 @@ def interpolate(
         return output_max
 
     ratio = clamp(
-        (value - input_min)
-        / (input_max - input_min),
+        (
+            value
+            - input_min
+        )
+        /
+        (
+            input_max
+            - input_min
+        ),
         0,
         1,
     )
 
     return (
         output_min
-        + ratio * (output_max - output_min)
+        +
+        ratio
+        *
+        (
+            output_max
+            - output_min
+        )
     )
 
+
+# =============================================================================
+# RAIN SCORE
+# =============================================================================
 
 def calculate_assistant_rain_score(
     rainfall_mm: float,
 ) -> float:
 
-    rain = max(0, rainfall_mm)
+    rain = max(
+        0,
+        rainfall_mm,
+    )
 
     if rain <= 10:
         return interpolate(
-            rain, 0, 10, 0, 3
+            rain,
+            0,
+            10,
+            0,
+            3,
         )
 
     if rain <= 30:
         return interpolate(
-            rain, 10, 30, 3, 12
+            rain,
+            10,
+            30,
+            3,
+            12,
         )
 
     if rain <= 60:
         return interpolate(
-            rain, 30, 60, 12, 28
+            rain,
+            30,
+            60,
+            12,
+            28,
         )
 
     if rain <= 90:
         return interpolate(
-            rain, 60, 90, 28, 38
+            rain,
+            60,
+            90,
+            28,
+            38,
         )
 
     return 40
 
 
+# =============================================================================
+# RIVER SCORE
+# =============================================================================
+
 def calculate_assistant_river_score(
     river_level_cm: float,
 ) -> float:
 
-    level = max(0, river_level_cm)
+    level = max(
+        0,
+        river_level_cm,
+    )
 
     if level <= 20:
         return 0
 
     if level <= 40:
         return interpolate(
-            level, 20, 40, 0, 6
+            level,
+            20,
+            40,
+            0,
+            6,
         )
 
     if level <= 60:
         return interpolate(
-            level, 40, 60, 6, 16
+            level,
+            40,
+            60,
+            6,
+            16,
         )
 
     if level <= 80:
         return interpolate(
-            level, 60, 80, 16, 30
+            level,
+            60,
+            80,
+            16,
+            30,
         )
 
     if level <= 95:
         return interpolate(
-            level, 80, 95, 30, 38
+            level,
+            80,
+            95,
+            30,
+            38,
         )
 
     return 40
 
 
+# =============================================================================
+# VERIFIED REPORT SCORE
+# =============================================================================
+
 def calculate_assistant_report_score(
     verified_reports: int,
 ) -> float:
 
-    reports = max(0, verified_reports)
+    reports = max(
+        0,
+        verified_reports,
+    )
 
     if reports == 0:
         return 0
@@ -2337,16 +1526,28 @@ def calculate_assistant_report_score(
 
     if reports <= 5:
         return interpolate(
-            reports, 3, 5, 12, 16
+            reports,
+            3,
+            5,
+            12,
+            16,
         )
 
     if reports <= 8:
         return interpolate(
-            reports, 5, 8, 16, 19
+            reports,
+            5,
+            8,
+            16,
+            19,
         )
 
     return 20
 
+
+# =============================================================================
+# SIGNAL FUSION
+# =============================================================================
 
 def calculate_assistant_amplification(
     rainfall_mm: float,
@@ -2374,22 +1575,32 @@ def calculate_assistant_amplification(
     return 0
 
 
+# =============================================================================
+# FINAL SCORE
+# =============================================================================
+
 def calculate_assistant_risk_score(
     rainfall_mm: float,
     river_level_cm: float,
     verified_reports: int,
 ) -> int:
 
-    rain_score = calculate_assistant_rain_score(
-        rainfall_mm
+    rain_score = (
+        calculate_assistant_rain_score(
+            rainfall_mm
+        )
     )
 
-    river_score = calculate_assistant_river_score(
-        river_level_cm
+    river_score = (
+        calculate_assistant_river_score(
+            river_level_cm
+        )
     )
 
-    report_score = calculate_assistant_report_score(
-        verified_reports
+    report_score = (
+        calculate_assistant_report_score(
+            verified_reports
+        )
     )
 
     amplification_score = (
@@ -2402,13 +1613,25 @@ def calculate_assistant_risk_score(
 
     total = (
         rain_score
-        + river_score
-        + report_score
-        + amplification_score
+        +
+        river_score
+        +
+        report_score
+        +
+        amplification_score
     )
 
-    return round(min(100, total))
+    return round(
+        min(
+            100,
+            total,
+        )
+    )
 
+
+# =============================================================================
+# RISK LEVEL
+# =============================================================================
 
 def assistant_risk_level(
     risk_score: int,
@@ -2416,6 +1639,10 @@ def assistant_risk_level(
     river_level_cm: float,
     verified_reports: int,
 ) -> str:
+
+    # -------------------------------------------------------------------------
+    # NUMERIC LEVEL
+    # -------------------------------------------------------------------------
 
     if risk_score >= 75:
         level = "CRITICAL"
@@ -2429,8 +1656,21 @@ def assistant_risk_level(
     else:
         level = "NORMAL"
 
-    if verified_reports > 0 and level == "NORMAL":
+
+    # -------------------------------------------------------------------------
+    # VERIFIED REPORT ESCALATION
+    # -------------------------------------------------------------------------
+
+    if (
+        verified_reports > 0
+        and level == "NORMAL"
+    ):
         level = "WATCH"
+
+
+    # -------------------------------------------------------------------------
+    # WATCH PHYSICAL SIGNAL
+    # -------------------------------------------------------------------------
 
     if (
         rainfall_mm >= WATCH_RAIN_MM
@@ -2439,12 +1679,25 @@ def assistant_risk_level(
         if level == "NORMAL":
             level = "WATCH"
 
+
+    # -------------------------------------------------------------------------
+    # HIGH PHYSICAL SIGNAL
+    # -------------------------------------------------------------------------
+
     if (
         rainfall_mm >= HIGH_RAIN_MM
         or river_level_cm >= HIGH_RIVER_CM
     ):
-        if level in {"NORMAL", "WATCH"}:
+        if level in {
+            "NORMAL",
+            "WATCH",
+        }:
             level = "HIGH"
+
+
+    # -------------------------------------------------------------------------
+    # CRITICAL PHYSICAL SIGNAL
+    # -------------------------------------------------------------------------
 
     critical_physical_signal = (
         rainfall_mm >= CRITICAL_RAIN_MM
@@ -2464,6 +1717,7 @@ def assistant_risk_level(
         and supporting_evidence
     ):
         level = "CRITICAL"
+
 
     return level
 
@@ -2489,7 +1743,9 @@ def register_user(
         password,
     )
 
-    token = create_access_token(user)
+    token = create_access_token(
+        user
+    )
 
     return {
         "accessToken": token,
@@ -2498,7 +1754,9 @@ def register_user(
     }
 
 
-@app.post("/api/auth/login")
+@app.post(
+    "/api/auth/login"
+)
 def login_user(
     email: str = Form(...),
     password: str = Form(...),
@@ -2510,7 +1768,9 @@ def login_user(
         password,
     )
 
-    token = create_access_token(user)
+    token = create_access_token(
+        user
+    )
 
     return {
         "accessToken": token,
@@ -2519,25 +1779,39 @@ def login_user(
     }
 
 
-@app.get("/api/auth/me")
+@app.get(
+    "/api/auth/me"
+)
 def get_authenticated_user(
-    current_user=Depends(require_user),
+    current_user = Depends(
+        require_user
+    ),
 ):
     return {
-        "user": user_to_dict(current_user)
+        "user": user_to_dict(
+            current_user
+        )
     }
+
 
 
 # =============================================================================
 # EMERGENCY ASSISTANT
 # =============================================================================
 
-@app.post("/api/assistant/chat")
+@app.post(
+    "/api/assistant/chat"
+)
 def emergency_assistant_chat(
     request: EmergencyAssistantRequest,
-    db: Session = Depends(get_db),
+    db: Session = Depends(
+        get_db
+    ),
 ):
-    message = request.message.strip()
+    message = (
+        request.message
+        .strip()
+    )
 
     if not message:
         raise HTTPException(
@@ -2546,12 +1820,16 @@ def emergency_assistant_chat(
         )
 
     ward_id = normalize_ward(
-        request.ward.strip().upper()
+        request.ward
+        .strip()
+        .upper()
     )
 
+    # Keep live environmental data fresh.
     update_simulation()
     fetch_real_rainfall()
 
+    # Reuse the exact ward data pipeline already used by /api/wards.
     ward_data = build_ward_response(
         ward_id,
         db,
@@ -2568,45 +1846,67 @@ def emergency_assistant_chat(
     )
 
     rainfall_mm = float(
-        ward_data.get("rainfallMm", 0)
+        ward_data.get(
+            "rainfallMm",
+            0,
+        )
     )
 
     river_level_cm = float(
-        ward_data.get("riverLevelCm", 0)
+        ward_data.get(
+            "riverLevelCm",
+            0,
+        )
     )
 
-    risk_score = calculate_assistant_risk_score(
-        rainfall_mm,
-        river_level_cm,
-        verified_reports,
+    risk_score = (
+        calculate_assistant_risk_score(
+            rainfall_mm,
+            river_level_cm,
+            verified_reports,
+        )
     )
 
-    risk_level = assistant_risk_level(
-        risk_score,
-        rainfall_mm,
-        river_level_cm,
-        verified_reports,
+    risk_level = (
+        assistant_risk_level(
+            risk_score,
+            rainfall_mm,
+            river_level_cm,
+            verified_reports,
+        )
     )
 
-    response = generate_emergency_response(
-        message=message,
-        ward_data=ward_data,
-        risk_level=risk_level,
+    response = (
+        generate_emergency_response(
+            message=message,
+            ward_data=ward_data,
+            risk_level=risk_level,
+        )
     )
 
-    response["riskScore"] = risk_score
-    response["dataMode"] = ward_data.get(
+    response[
+        "riskScore"
+    ] = risk_score
+
+    response[
+        "dataMode"
+    ] = ward_data.get(
         "dataMode",
         "HYBRID",
     )
 
-    response["sources"] = ward_data.get(
+    response[
+        "sources"
+    ] = ward_data.get(
         "sources",
         {},
     )
 
-    response["timestamp"] = int(
-        time.time() * 1000
+    response[
+        "timestamp"
+    ] = int(
+        time.time()
+        * 1000
     )
 
     return response
@@ -2616,26 +1916,59 @@ def emergency_assistant_chat(
 # HEALTH
 # =============================================================================
 
-@app.get("/api/health")
+@app.get(
+    "/api/health"
+)
 def health(
-    db: Session = Depends(get_db),
+    db: Session = Depends(
+        get_db
+    ),
 ):
+
     reports_stored = (
-        db.query(IncidentReport).count()
+        db.query(
+            IncidentReport
+        )
+        .count()
     )
 
     return {
-        "status": "ok",
-        "service": "PRAVAAH Backend",
-        "version": "2.0.0",
-        "database": "SQLite",
-        "databaseStatus": "online",
-        "wardsLoaded": len(WARD_COORDINATES),
-        "reportsStored": reports_stored,
-        "sensorReadingsStored": (
-            db.query(SensorReading).count()
-        ),
-        "weatherAvailable": WEATHER_AVAILABLE,
+
+        "status":
+            "ok",
+
+        "service":
+            "PRAVAAH Backend",
+
+        "version":
+            "2.0.0",
+
+        "database":
+            (
+                "PostgreSQL"
+                if engine.url.get_backend_name()
+                == "postgresql"
+                else "SQLite"
+            ),
+
+        "databaseStatus":
+            "online",
+
+        "wardsLoaded":
+            len(
+                WARD_COORDINATES
+            ),
+
+        "reportsStored":
+            reports_stored,
+
+        "sensorReadingsStored":
+            db.query(
+                SensorReading
+            ).count(),
+
+        "weatherAvailable":
+            WEATHER_AVAILABLE,
     }
 
 
@@ -2643,116 +1976,178 @@ def health(
 # SYSTEM STATUS
 # =============================================================================
 
-@app.get("/api/system-status")
+@app.get(
+    "/api/system-status"
+)
 def system_status(
-    db: Session = Depends(get_db),
+    db: Session = Depends(
+        get_db
+    ),
 ):
+
     rainfall_mode = (
         "real"
         if WEATHER_AVAILABLE
-        else "simulated"
+        else
+        "simulated"
     )
 
     rainfall_description = (
         "Open-Meteo hourly precipitation data"
         if WEATHER_AVAILABLE
-        else (
-            "Open-Meteo unavailable - "
-            "simulation fallback active"
+        else
+        "Open-Meteo unavailable - simulation fallback active"
+    )
+
+    total_reports = (
+        db.query(
+            IncidentReport
+        )
+        .count()
+    )
+
+    pending_reports = (
+        count_reports_by_status(
+            db,
+            "PENDING",
         )
     )
 
-    total_reports = db.query(
-        IncidentReport
-    ).count()
-
-    pending_reports = count_reports_by_status(
-        db,
-        "PENDING",
+    verified_reports = (
+        count_reports_by_status(
+            db,
+            "VERIFIED",
+        )
     )
 
-    verified_reports = count_reports_by_status(
-        db,
-        "VERIFIED",
-    )
-
-    rejected_reports = count_reports_by_status(
-        db,
-        "REJECTED",
+    rejected_reports = (
+        count_reports_by_status(
+            db,
+            "REJECTED",
+        )
     )
 
     return {
-        "status": "operational",
-        "dataMode": "HYBRID",
+
+        "status":
+            "operational",
+
+        "dataMode":
+            "HYBRID",
 
         "services": {
+
             "wardData": {
-                "status": "online",
-                "mode": "real",
-                "description": (
-                    "Real Bhubaneswar ward coordinates"
-                ),
+
+                "status":
+                    "online",
+
+                "mode":
+                    "real",
+
+                "description":
+                    "Real Bhubaneswar ward coordinates",
             },
 
             "rainfall": {
-                "status": "online",
-                "mode": rainfall_mode,
-                "description": rainfall_description,
+
+                "status":
+                    "online",
+
+                "mode":
+                    rainfall_mode,
+
+                "description":
+                    rainfall_description,
             },
 
             "riverLevel": {
-                "status": "online",
-                "mode": "simulated",
-                "description": (
-                    "IoT river-level readings where "
-                    "available with simulated fallback"
-                ),
+
+                "status":
+                    "online",
+
+                "mode":
+                    "simulated",
+
+                "description":
+                    "IoT river-level readings where available with simulated fallback",
             },
 
             "crowdReports": {
-                "status": "online",
-                "mode": "real",
-                "description": (
-                    "Human-verified citizen incident "
-                    "reports with GPS and photo evidence"
-                ),
+
+                "status":
+                    "online",
+
+                "mode":
+                    "real",
+
+                "description":
+                    "Human-verified citizen incident reports with GPS and photo evidence",
             },
 
             "database": {
-                "status": "online",
-                "mode": "persistent",
-                "description": (
-                    "SQLite persistent incident-report database"
-                ),
+
+                "status":
+                    "online",
+
+                "mode":
+                    "persistent",
+
+                "description":
+                    (
+                        "PostgreSQL persistent operational database"
+                        if engine.url.get_backend_name()
+                        == "postgresql"
+                        else
+                        "SQLite persistent local database"
+                    ),
             },
 
             "authentication": {
-                "status": "online",
-                "mode": "JWT",
-                "description": (
-                    "Role-based USER and OFFICER authentication"
-                ),
+
+                "status":
+                    "online",
+
+                "mode":
+                    "JWT",
+
+                "description":
+                    "Role-based USER and OFFICER authentication",
             },
         },
 
         "reports": {
-            "total": total_reports,
-            "pending": pending_reports,
-            "verified": verified_reports,
-            "rejected": rejected_reports,
+
+            "total":
+                total_reports,
+
+            "pending":
+                pending_reports,
+
+            "verified":
+                verified_reports,
+
+            "rejected":
+                rejected_reports,
         },
 
         "verificationPolicy": {
-            "riskContribution": "VERIFIED_ONLY",
-            "pendingReports": (
-                "Do not affect operational risk score"
-            ),
-            "rejectedReports": (
-                "Excluded from operational risk score"
-            ),
+
+            "riskContribution":
+                "VERIFIED_ONLY",
+
+            "pendingReports":
+                "Do not affect operational risk score",
+
+            "rejectedReports":
+                "Excluded from operational risk score",
         },
 
-        "lastUpdated": int(time.time() * 1000),
+        "lastUpdated":
+            int(
+                time.time()
+                * 1000
+            ),
     }
 
 
@@ -2760,43 +2155,65 @@ def system_status(
 # WEATHER
 # =============================================================================
 
-@app.get("/api/weather")
+@app.get(
+    "/api/weather"
+)
 def weather():
+
     update_simulation()
+
     fetch_real_rainfall()
 
     return {
-        "provider": (
-            "Open-Meteo"
-            if WEATHER_AVAILABLE
-            else "Simulation"
-        ),
 
-        "mode": (
-            "REAL"
-            if WEATHER_AVAILABLE
-            else "SIMULATED"
-        ),
+        "provider":
+            (
+                "Open-Meteo"
+                if WEATHER_AVAILABLE
+                else
+                "Simulation"
+            ),
 
-        "available": WEATHER_AVAILABLE,
+        "mode":
+            (
+                "REAL"
+                if WEATHER_AVAILABLE
+                else
+                "SIMULATED"
+            ),
+
+        "available":
+            WEATHER_AVAILABLE,
 
         "wards": [
+
             {
-                "ward": ward_id,
-                "rainfallMm": get_rainfall(
-                    ward_id
-                ),
+
+                "ward":
+                    ward_id,
+
+                "rainfallMm":
+                    get_rainfall(
+                        ward_id
+                    ),
             }
-            for ward_id in WARD_COORDINATES
+
+            for ward_id
+            in WARD_COORDINATES
         ],
 
-        "lastUpdated": (
-            int(LAST_WEATHER_UPDATE * 1000)
-            if LAST_WEATHER_UPDATE
-            else None
-        ),
+        "lastUpdated":
+            (
+                int(
+                    LAST_WEATHER_UPDATE
+                    * 1000
+                )
+                if LAST_WEATHER_UPDATE
+                else None
+            ),
 
-        "error": WEATHER_ERROR,
+        "error":
+            WEATHER_ERROR,
     }
 
 
@@ -2804,19 +2221,28 @@ def weather():
 # ALL WARDS
 # =============================================================================
 
-@app.get("/api/wards")
+@app.get(
+    "/api/wards"
+)
 def get_all_wards(
-    db: Session = Depends(get_db),
+    db: Session = Depends(
+        get_db
+    ),
 ):
+
     update_simulation()
+
     fetch_real_rainfall()
 
     return [
+
         build_ward_response(
             ward_id,
             db,
         )
-        for ward_id in WARD_COORDINATES
+
+        for ward_id
+        in WARD_COORDINATES
     ]
 
 
@@ -2824,19 +2250,33 @@ def get_all_wards(
 # SINGLE WARD
 # =============================================================================
 
-@app.get("/api/wards/{ward_id}")
+@app.get(
+    "/api/wards/{ward_id}"
+)
 def get_ward(
+
     ward_id: str,
-    db: Session = Depends(get_db),
+
+    db: Session = Depends(
+        get_db
+    ),
 ):
-    ward_id = normalize_ward(ward_id)
+
+    ward_id = (
+        normalize_ward(
+            ward_id
+        )
+    )
 
     update_simulation()
+
     fetch_real_rainfall()
 
-    return build_ward_response(
-        ward_id,
-        db,
+    return (
+        build_ward_response(
+            ward_id,
+            db,
+        )
     )
 
 
@@ -2849,19 +2289,45 @@ def get_ward(
     status_code=201,
 )
 async def create_report(
-    ward: str = Form(...),
-    reportType: str = Form(...),
-    severity: str = Form(...),
-    description: str = Form(...),
-    latitude: float | None = Form(None),
-    longitude: float | None = Form(None),
-    photo: UploadFile | None = File(None),
-    db: Session = Depends(get_db),
-    current_user=Depends(require_user),
-):
-    ward_id = normalize_ward(ward)
 
-    severity = severity.upper()
+    ward: str = Form(...),
+
+    reportType: str = Form(...),
+
+    severity: str = Form(...),
+
+    description: str = Form(...),
+
+    latitude: float | None = Form(
+        None
+    ),
+
+    longitude: float | None = Form(
+        None
+    ),
+
+    photo: UploadFile | None = File(
+        None
+    ),
+
+    db: Session = Depends(
+        get_db
+    ),
+
+    current_user = Depends(
+        require_user
+    ),
+):
+
+    ward_id = (
+        normalize_ward(
+            ward
+        )
+    )
+
+    severity = (
+        severity.upper()
+    )
 
     allowed_severity = {
         "LOW",
@@ -2870,68 +2336,137 @@ async def create_report(
         "CRITICAL",
     }
 
-    if severity not in allowed_severity:
+    if (
+        severity
+        not in allowed_severity
+    ):
+
         raise HTTPException(
             status_code=400,
             detail=(
-                "Severity must be LOW, MEDIUM, "
-                "HIGH, or CRITICAL."
+                "Severity must be LOW, MEDIUM, HIGH, or CRITICAL."
             ),
         )
 
-    clean_report_type = reportType.strip()
+    clean_report_type = (
+        reportType.strip()
+    )
 
-    if len(clean_report_type) < 2:
+    if (
+        len(
+            clean_report_type
+        )
+        < 2
+    ):
+
         raise HTTPException(
             status_code=400,
-            detail="Report type is required.",
+            detail=(
+                "Report type is required."
+            ),
         )
 
-    clean_description = description.strip()
+    clean_description = (
+        description.strip()
+    )
 
-    if len(clean_description) < 3:
+    if (
+        len(
+            clean_description
+        )
+        < 3
+    ):
+
         raise HTTPException(
             status_code=400,
-            detail="Description is too short.",
+            detail=(
+                "Description is too short."
+            ),
         )
 
     if (
         latitude is not None
-        and not -90 <= latitude <= 90
+        and (
+            latitude < -90
+            or latitude > 90
+        )
     ):
+
         raise HTTPException(
             status_code=400,
-            detail="Invalid latitude.",
+            detail=(
+                "Invalid latitude."
+            ),
         )
 
     if (
         longitude is not None
-        and not -180 <= longitude <= 180
+        and (
+            longitude < -180
+            or longitude > 180
+        )
     ):
+
         raise HTTPException(
             status_code=400,
-            detail="Invalid longitude.",
+            detail=(
+                "Invalid longitude."
+            ),
         )
 
-    photo_url = await save_photo(photo)
+    photo_url = (
+        await save_photo(
+            photo
+        )
+    )
 
     report = IncidentReport(
-        id=str(uuid.uuid4()),
-        reporter_user_id=current_user.id,
+
+        id=str(
+            uuid.uuid4()
+        ),
+
+        reporter_user_id=(
+            current_user.id
+        ),
+
         ward=ward_id,
-        report_type=clean_report_type,
+
+        report_type=(
+            clean_report_type
+        ),
+
         severity=severity,
-        description=clean_description,
+
+        description=(
+            clean_description
+        ),
+
         latitude=latitude,
+
         longitude=longitude,
+
         photo_url=photo_url,
+
         status="PENDING",
-        created_at=int(time.time() * 1000),
+
+        created_at=int(
+            time.time()
+            * 1000
+        ),
+
         verified_at=None,
     )
 
     try:
-        db.add(report)
+
+        db.add(
+            report
+        )
+
+        # -------------------------------------------------------------------------
+        # NOTIFY OFFICERS ABOUT NEW CITIZEN REPORT
+        # -------------------------------------------------------------------------
 
         create_notification(
             db=db,
@@ -2950,51 +2485,93 @@ async def create_report(
         )
 
         db.commit()
-        db.refresh(report)
+
+        db.refresh(
+            report
+        )
 
     except Exception:
+
         db.rollback()
 
         if photo_url:
-            filepath = photo_url.lstrip("/")
 
-            if os.path.exists(filepath):
-                os.remove(filepath)
+            filepath = (
+                photo_url.lstrip(
+                    "/"
+                )
+            )
+
+            if os.path.exists(
+                filepath
+            ):
+
+                os.remove(
+                    filepath
+                )
 
         raise HTTPException(
             status_code=500,
-            detail="Unable to store incident report.",
+            detail=(
+                "Unable to store incident report."
+            ),
         )
 
-    WARD_STATE[ward_id]["reportCount"] = (
+    # Newly submitted report is PENDING.
+    # Therefore it does NOT increase
+    # the risk-engine report count.
+
+    WARD_STATE[
+        ward_id
+    ][
+        "reportCount"
+    ] = (
         count_verified_reports(
             ward_id,
             db,
         )
     )
 
-    return report_to_dict(report)
+    return (
+        report_to_dict(
+            report
+        )
+    )
 
 
 # =============================================================================
 # ALL REPORTS
 # =============================================================================
 
-@app.get("/api/reports")
+@app.get(
+    "/api/reports"
+)
 def get_reports(
-    db: Session = Depends(get_db),
+    db: Session = Depends(
+        get_db
+    ),
 ):
+
     reports = (
-        db.query(IncidentReport)
+        db.query(
+            IncidentReport
+        )
         .order_by(
-            IncidentReport.created_at.desc()
+            IncidentReport
+            .created_at
+            .desc()
         )
         .all()
     )
 
     return [
-        report_to_dict(report)
-        for report in reports
+
+        report_to_dict(
+            report
+        )
+
+        for report
+        in reports
     ]
 
 
@@ -3002,27 +2579,48 @@ def get_reports(
 # REPORTS FOR ONE WARD
 # =============================================================================
 
-@app.get("/api/reports/ward/{ward_id}")
+@app.get(
+    "/api/reports/ward/{ward_id}"
+)
 def get_reports_for_ward(
+
     ward_id: str,
-    db: Session = Depends(get_db),
+
+    db: Session = Depends(
+        get_db
+    ),
 ):
-    ward_id = normalize_ward(ward_id)
+
+    ward_id = (
+        normalize_ward(
+            ward_id
+        )
+    )
 
     reports = (
-        db.query(IncidentReport)
+        db.query(
+            IncidentReport
+        )
         .filter(
-            IncidentReport.ward == ward_id
+            IncidentReport.ward
+            == ward_id
         )
         .order_by(
-            IncidentReport.created_at.desc()
+            IncidentReport
+            .created_at
+            .desc()
         )
         .all()
     )
 
     return [
-        report_to_dict(report)
-        for report in reports
+
+        report_to_dict(
+            report
+        )
+
+        for report
+        in reports
     ]
 
 
@@ -3030,26 +2628,43 @@ def get_reports_for_ward(
 # SINGLE REPORT
 # =============================================================================
 
-@app.get("/api/reports/{report_id}")
+@app.get(
+    "/api/reports/{report_id}"
+)
 def get_single_report(
+
     report_id: str,
-    db: Session = Depends(get_db),
+
+    db: Session = Depends(
+        get_db
+    ),
 ):
+
     report = (
-        db.query(IncidentReport)
+        db.query(
+            IncidentReport
+        )
         .filter(
-            IncidentReport.id == report_id
+            IncidentReport.id
+            == report_id
         )
         .first()
     )
 
     if report is None:
+
         raise HTTPException(
             status_code=404,
-            detail="Report not found",
+            detail=(
+                "Report not found"
+            ),
         )
 
-    return report_to_dict(report)
+    return (
+        report_to_dict(
+            report
+        )
+    )
 
 
 # =============================================================================
@@ -3060,12 +2675,23 @@ def get_single_report(
     "/api/reports/{report_id}/verification"
 )
 async def verify_report(
+
     report_id: str,
+
     status: str = Form(...),
-    db: Session = Depends(get_db),
-    current_officer=Depends(require_officer),
+
+    db: Session = Depends(
+        get_db
+    ),
+
+    current_officer = Depends(
+        require_officer
+    ),
 ):
-    status = status.upper()
+
+    status = (
+        status.upper()
+    )
 
     allowed_status = {
         "PENDING",
@@ -3073,50 +2699,86 @@ async def verify_report(
         "REJECTED",
     }
 
-    if status not in allowed_status:
+    if (
+        status
+        not in allowed_status
+    ):
+
         raise HTTPException(
             status_code=400,
             detail=(
-                "Status must be PENDING, "
-                "VERIFIED, or REJECTED."
+                "Status must be PENDING, VERIFIED, or REJECTED."
             ),
         )
 
     report = (
-        db.query(IncidentReport)
+        db.query(
+            IncidentReport
+        )
         .filter(
-            IncidentReport.id == report_id
+            IncidentReport.id
+            == report_id
         )
         .first()
     )
 
     if report is None:
+
         raise HTTPException(
             status_code=404,
-            detail="Report not found",
+            detail=(
+                "Report not found"
+            ),
         )
 
-    previous_status = report.status
-    report.status = status
+    previous_status = (
+        report.status
+    )
 
-    if status in {"VERIFIED", "REJECTED"}:
-        report.verified_at = int(
-            time.time() * 1000
+    report.status = (
+        status
+    )
+
+    if (
+        status
+        in {
+            "VERIFIED",
+            "REJECTED",
+        }
+    ):
+
+        report.verified_at = (
+            int(
+                time.time()
+                * 1000
+            )
         )
 
     else:
-        report.verified_at = None
+
+        report.verified_at = (
+            None
+        )
 
     try:
+
         if (
-            report.reporter_user_id is not None
-            and status in {
+            report.reporter_user_id
+            is not None
+            and status
+            in {
                 "VERIFIED",
                 "REJECTED",
             }
-            and previous_status != status
+            and previous_status
+            != status
         ):
-            if status == "VERIFIED":
+
+            if (
+                status
+                == "VERIFIED"
+            ):
+
                 create_notification(
                     db=db,
                     recipient_role="USER",
@@ -3136,7 +2798,11 @@ async def verify_report(
                     action_target=report.id,
                 )
 
-            elif status == "REJECTED":
+            elif (
+                status
+                == "REJECTED"
+            ):
+
                 create_notification(
                     db=db,
                     recipient_role="USER",
@@ -3157,9 +2823,13 @@ async def verify_report(
                 )
 
         db.commit()
-        db.refresh(report)
+
+        db.refresh(
+            report
+        )
 
     except Exception as error:
+
         db.rollback()
 
         print(
@@ -3170,42 +2840,64 @@ async def verify_report(
         raise HTTPException(
             status_code=500,
             detail=(
-                "Unable to update report "
-                "verification status."
+                "Unable to update report verification status."
             ),
         )
 
-    WARD_STATE[report.ward]["reportCount"] = (
+    WARD_STATE[
+        report.ward
+    ][
+        "reportCount"
+    ] = (
         count_verified_reports(
             report.ward,
             db,
         )
     )
 
-    return report_to_dict(report)
+    return (
+        report_to_dict(
+            report
+        )
+    )
 
 
 # =============================================================================
-# MY REPORTS
+# MY REPORTS - CURRENT CITIZEN
 # =============================================================================
 
-@app.get("/api/my-reports")
+@app.get(
+    "/api/my-reports"
+)
 def get_my_reports(
-    db: Session = Depends(get_db),
-    current_user=Depends(require_user),
+    db: Session = Depends(
+        get_db
+    ),
+    current_user = Depends(
+        require_user
+    ),
 ):
-    if getattr(
-        current_user,
-        "role",
-        None,
-    ) != "USER":
+
+    if (
+        getattr(
+            current_user,
+            "role",
+            None,
+        )
+        != "USER"
+    ):
+
         raise HTTPException(
             status_code=403,
-            detail="Citizen account required.",
+            detail=(
+                "Citizen account required."
+            ),
         )
 
     reports = (
-        db.query(IncidentReport)
+        db.query(
+            IncidentReport
+        )
         .filter(
             IncidentReport.reporter_user_id
             == current_user.id
@@ -3217,54 +2909,84 @@ def get_my_reports(
     )
 
     return [
-        report_to_dict(report)
-        for report in reports
+        report_to_dict(
+            report
+        )
+        for report
+        in reports
     ]
 
 
-@app.get("/api/my-reports/{report_id}")
+# =============================================================================
+# SINGLE MY REPORT
+# =============================================================================
+
+@app.get(
+    "/api/my-reports/{report_id}"
+)
 def get_my_report(
     report_id: str,
-    db: Session = Depends(get_db),
-    current_user=Depends(require_user),
+    db: Session = Depends(
+        get_db
+    ),
+    current_user = Depends(
+        require_user
+    ),
 ):
-    if getattr(
-        current_user,
-        "role",
-        None,
-    ) != "USER":
+
+    if (
+        getattr(
+            current_user,
+            "role",
+            None,
+        )
+        != "USER"
+    ):
+
         raise HTTPException(
             status_code=403,
-            detail="Citizen account required.",
+            detail=(
+                "Citizen account required."
+            ),
         )
 
     report = (
-        db.query(IncidentReport)
+        db.query(
+            IncidentReport
+        )
         .filter(
-            IncidentReport.id == report_id,
+            IncidentReport.id
+            == report_id,
             IncidentReport.reporter_user_id
             == current_user.id,
         )
         .first()
     )
 
-    if report is None:
+    if (
+        report
+        is None
+    ):
+
         raise HTTPException(
             status_code=404,
-            detail="Report not found.",
+            detail=(
+                "Report not found."
+            ),
         )
 
-    return report_to_dict(report)
+    return (
+        report_to_dict(
+            report
+        )
+    )
 
 
 # =============================================================================
 # SENSOR INGESTION
 # =============================================================================
 
-@app.post(
-    "/api/sensors/readings",
-    status_code=201,
-)
+@app.post("/api/sensors/readings", status_code=201)
 def create_sensor_reading(
     sensorId: str = Form(...),
     ward: str = Form(...),
@@ -3280,60 +3002,28 @@ def create_sensor_reading(
     ward_id = normalize_ward(ward)
 
     clean_sensor_id = sensorId.strip()
-
     if len(clean_sensor_id) < 2:
-        raise HTTPException(
-            status_code=400,
-            detail="sensorId is required.",
-        )
+        raise HTTPException(status_code=400, detail="sensorId is required.")
 
-    clean_sensor_type = validate_sensor_type(
-        sensorType
-    )
-
+    clean_sensor_type = validate_sensor_type(sensorType)
     clean_unit = unit.strip()
-
     if not clean_unit:
-        raise HTTPException(
-            status_code=400,
-            detail="unit is required.",
-        )
+        raise HTTPException(status_code=400, detail="unit is required.")
 
-    clean_status = validate_sensor_status(
-        status
-    )
+    clean_status = validate_sensor_status(status)
+    clean_source = source.strip().upper() or "IOT"
 
-    clean_source = (
-        source.strip().upper() or "IOT"
-    )
+    if latitude is not None and not -90 <= latitude <= 90:
+        raise HTTPException(status_code=400, detail="Invalid latitude.")
 
-    if (
-        latitude is not None
-        and not -90 <= latitude <= 90
-    ):
-        raise HTTPException(
-            status_code=400,
-            detail="Invalid latitude.",
-        )
-
-    if (
-        longitude is not None
-        and not -180 <= longitude <= 180
-    ):
-        raise HTTPException(
-            status_code=400,
-            detail="Invalid longitude.",
-        )
+    if longitude is not None and not -180 <= longitude <= 180:
+        raise HTTPException(status_code=400, detail="Invalid longitude.")
 
     if latitude is None:
-        latitude = WARD_COORDINATES[
-            ward_id
-        ]["latitude"]
+        latitude = WARD_COORDINATES[ward_id]["latitude"]
 
     if longitude is None:
-        longitude = WARD_COORDINATES[
-            ward_id
-        ]["longitude"]
+        longitude = WARD_COORDINATES[ward_id]["longitude"]
 
     reading = SensorReading(
         id=str(uuid.uuid4()),
@@ -3353,19 +3043,10 @@ def create_sensor_reading(
         db.add(reading)
         db.commit()
         db.refresh(reading)
-
     except Exception as error:
         db.rollback()
-
-        print(
-            "Unable to store sensor reading:",
-            error,
-        )
-
-        raise HTTPException(
-            status_code=500,
-            detail="Unable to store sensor reading.",
-        )
+        print("Unable to store sensor reading:", error)
+        raise HTTPException(status_code=500, detail="Unable to store sensor reading.")
 
     return sensor_to_dict(reading)
 
@@ -3375,21 +3056,13 @@ def create_sensor_reading(
 # =============================================================================
 
 @app.get("/api/sensors")
-def get_sensor_readings(
-    db: Session = Depends(get_db),
-):
+def get_sensor_readings(db: Session = Depends(get_db)):
     readings = (
         db.query(SensorReading)
-        .order_by(
-            SensorReading.timestamp.desc()
-        )
+        .order_by(SensorReading.timestamp.desc())
         .all()
     )
-
-    return [
-        sensor_to_dict(reading)
-        for reading in readings
-    ]
+    return [sensor_to_dict(reading) for reading in readings]
 
 
 # =============================================================================
@@ -3397,32 +3070,20 @@ def get_sensor_readings(
 # =============================================================================
 
 @app.get("/api/sensors/latest")
-def get_latest_sensor_readings(
-    db: Session = Depends(get_db),
-):
+def get_latest_sensor_readings(db: Session = Depends(get_db)):
     readings = (
         db.query(SensorReading)
-        .order_by(
-            SensorReading.timestamp.desc()
-        )
+        .order_by(SensorReading.timestamp.desc())
         .all()
     )
 
     latest = {}
-
     for reading in readings:
-        key = (
-            reading.ward,
-            reading.sensor_type,
-        )
-
+        key = (reading.ward, reading.sensor_type)
         if key not in latest:
             latest[key] = reading
 
-    return [
-        sensor_to_dict(reading)
-        for reading in latest.values()
-    ]
+    return [sensor_to_dict(reading) for reading in latest.values()]
 
 
 # =============================================================================
@@ -3438,23 +3099,20 @@ def get_sensor_readings_for_ward(
 
     readings = (
         db.query(SensorReading)
-        .filter(
-            SensorReading.ward == ward_id
-        )
-        .order_by(
-            SensorReading.timestamp.desc()
-        )
+        .filter(SensorReading.ward == ward_id)
+        .order_by(SensorReading.timestamp.desc())
         .all()
     )
 
-    return [
-        sensor_to_dict(reading)
-        for reading in readings
-    ]
-
+    return [sensor_to_dict(reading) for reading in readings]
 
 # =============================================================================
 # NOTIFICATIONS
+# =============================================================================
+
+
+# =============================================================================
+# GET CURRENT USER NOTIFICATIONS
 # =============================================================================
 
 @app.get("/api/notifications")
@@ -3503,7 +3161,7 @@ def get_notifications(
 
 
 # =============================================================================
-# UNREAD NOTIFICATION COUNT
+# GET UNREAD NOTIFICATION COUNT
 # =============================================================================
 
 @app.get("/api/notifications/unread-count")
@@ -3542,16 +3200,16 @@ def get_notification_unread_count(
         .count()
     )
 
-    return {"count": count}
+    return {
+        "count": count,
+    }
 
 
 # =============================================================================
 # MARK ONE NOTIFICATION AS READ
 # =============================================================================
 
-@app.patch(
-    "/api/notifications/{notification_id}/read"
-)
+@app.patch("/api/notifications/{notification_id}/read")
 def mark_notification_read(
     notification_id: str,
     db: Session = Depends(get_db),
@@ -3589,22 +3247,16 @@ def mark_notification_read(
     }:
         raise HTTPException(
             status_code=403,
-            detail=(
-                "You cannot access this notification."
-            ),
+            detail="You cannot access this notification.",
         )
 
     if (
-        notification.recipient_user_id
-        is not None
-        and notification.recipient_user_id
-        != user_id
+        notification.recipient_user_id is not None
+        and notification.recipient_user_id != user_id
     ):
         raise HTTPException(
             status_code=403,
-            detail=(
-                "You cannot access this notification."
-            ),
+            detail="You cannot access this notification.",
         )
 
     notification.is_read = 1
@@ -3624,7 +3276,9 @@ def mark_notification_read(
             detail="Unable to update notification.",
         )
 
-    return notification_to_dict(notification)
+    return notification_to_dict(
+        notification
+    )
 
 
 # =============================================================================
@@ -3667,7 +3321,9 @@ def mark_all_notifications_read(
         .all()
     )
 
-    now = int(time.time() * 1000)
+    now = int(
+        time.time() * 1000
+    )
 
     for notification in notifications:
         notification.is_read = 1
@@ -3687,3 +3343,4 @@ def mark_all_notifications_read(
     return {
         "updated": len(notifications)
     }
+
