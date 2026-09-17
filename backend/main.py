@@ -1729,6 +1729,15 @@ def build_ward_response(
     ward_id: str,
     db: Session,
 ):
+    """
+    Build one ward response efficiently.
+
+    The old implementation executed many separate PostgreSQL queries for
+    sensor types and report counts. This version loads the ward's reports
+    and online sensor readings in two database queries, then preserves the
+    same risk-engine calculation and response structure.
+    """
+
     # =========================================================================
     # BASE WARD INFORMATION
     # =========================================================================
@@ -1750,13 +1759,11 @@ def build_ward_response(
         ward_id
     )
 
-
     rainfall_source = (
         "Open-Meteo weather model"
         if WEATHER_AVAILABLE
         else "Simulated weather fallback"
     )
-
 
     rainfall_mode = (
         "REAL"
@@ -1766,16 +1773,91 @@ def build_ward_response(
 
 
     # =========================================================================
-    # RIVER LEVEL
+    # LOAD THIS WARD'S ONLINE SENSORS ONCE
     # =========================================================================
 
+    required_sensor_types = {
+        "RIVER_LEVEL",
+        "WIND_SPEED",
+        "FIRE_RISK",
+        "SMOKE",
+        "SEISMIC_INTENSITY",
+        "INFRASTRUCTURE_STRESS",
+    }
+
+    ward_sensors = (
+        db.query(SensorReading)
+        .filter(
+            SensorReading.ward == ward_id,
+            SensorReading.status == "ONLINE",
+            SensorReading.sensor_type.in_(
+                required_sensor_types
+            ),
+        )
+        .order_by(
+            SensorReading.timestamp.desc()
+        )
+        .all()
+    )
+
+    latest_sensor_by_type = {}
+
+    for sensor in ward_sensors:
+        if sensor.sensor_type not in latest_sensor_by_type:
+            latest_sensor_by_type[
+                sensor.sensor_type
+            ] = sensor
+
+
     latest_river_sensor = (
-        get_latest_online_river_sensor(
-            ward_id,
-            db,
+        latest_sensor_by_type.get(
+            "RIVER_LEVEL"
         )
     )
 
+    latest_wind_sensor = (
+        latest_sensor_by_type.get(
+            "WIND_SPEED"
+        )
+    )
+
+    latest_fire_sensor = (
+        latest_sensor_by_type.get(
+            "FIRE_RISK"
+        )
+    )
+
+    latest_smoke_sensor = (
+        latest_sensor_by_type.get(
+            "SMOKE"
+        )
+    )
+
+    latest_seismic_sensor = (
+        latest_sensor_by_type.get(
+            "SEISMIC_INTENSITY"
+        )
+    )
+
+    latest_infrastructure_sensor = (
+        latest_sensor_by_type.get(
+            "INFRASTRUCTURE_STRESS"
+        )
+    )
+
+
+    def sensor_value(sensor):
+        if sensor is None:
+            return None
+
+        return float(
+            sensor.value
+        )
+
+
+    # =========================================================================
+    # RIVER LEVEL
+    # =========================================================================
 
     if latest_river_sensor is not None:
 
@@ -1783,21 +1865,17 @@ def build_ward_response(
             latest_river_sensor.value
         )
 
-
         river_level_source = (
             latest_river_sensor.sensor_id
         )
-
 
         river_level_mode = (
             "IOT"
         )
 
-
         river_level_timestamp = (
             latest_river_sensor.timestamp
         )
-
 
     else:
 
@@ -1807,106 +1885,62 @@ def build_ward_response(
             ]
         )
 
-
         river_level_source = (
             "Simulated river sensor fallback"
         )
-
 
         river_level_mode = (
             "SIMULATED"
         )
 
+        river_level_timestamp = None
 
-        river_level_timestamp = (
-            None
+
+    # =========================================================================
+    # LOAD THIS WARD'S REPORTS ONCE
+    # =========================================================================
+
+    ward_reports = (
+        db.query(IncidentReport)
+        .filter(
+            IncidentReport.ward == ward_id
         )
-
-
-    # =========================================================================
-    # MULTI-HAZARD SENSOR OBSERVATIONS
-    # =========================================================================
-
-    latest_wind_sensor = get_latest_online_sensor(
-        ward_id,
-        "WIND_SPEED",
-        db,
-    )
-
-    latest_fire_sensor = get_latest_online_sensor(
-        ward_id,
-        "FIRE_RISK",
-        db,
-    )
-
-    latest_smoke_sensor = get_latest_online_sensor(
-        ward_id,
-        "SMOKE",
-        db,
-    )
-
-    latest_seismic_sensor = get_latest_online_sensor(
-        ward_id,
-        "SEISMIC_INTENSITY",
-        db,
-    )
-
-    latest_infrastructure_sensor = get_latest_online_sensor(
-        ward_id,
-        "INFRASTRUCTURE_STRESS",
-        db,
-    )
-
-    def sensor_value(sensor):
-        if sensor is None:
-            return None
-
-        return float(sensor.value)
-
-    wind_speed_kmh = sensor_value(latest_wind_sensor)
-    fire_risk_index = sensor_value(latest_fire_sensor)
-    smoke_level = sensor_value(latest_smoke_sensor)
-    seismic_intensity = sensor_value(latest_seismic_sensor)
-    infrastructure_stress = sensor_value(
-        latest_infrastructure_sensor
-    )
-
-
-    # =========================================================================
-    # REPORT INFORMATION
-    # =========================================================================
-
-    report_breakdown = (
-        get_ward_report_breakdown(
-            ward_id,
-            db,
+        .order_by(
+            IncidentReport.created_at.desc()
         )
+        .all()
     )
 
+    verified_reports_raw = [
+        report
+        for report in ward_reports
+        if report.status == "VERIFIED"
+    ]
 
-    verified_report_count = (
-        report_breakdown[
-            "verified"
-        ]
+    verified_report_count = len(
+        verified_reports_raw
     )
 
+    pending_report_count = sum(
+        1
+        for report in ward_reports
+        if report.status == "PENDING"
+    )
+
+    rejected_report_count = sum(
+        1
+        for report in ward_reports
+        if report.status == "REJECTED"
+    )
+
+    verified_reports = [
+        report_to_dict(report)
+        for report in verified_reports_raw
+    ]
 
     reading[
         "reportCount"
     ] = verified_report_count
-
-
-    # Get the actual verified report objects.
-    #
-    # The old system only needed the number of reports.
-    # Multi-hazard fusion needs report type, severity,
-    # description, and verification information.
-    verified_reports = (
-        get_verified_ward_reports(
-            ward_id,
-            db,
-        )
-    )
 
 
     # =========================================================================
@@ -1918,68 +1952,53 @@ def build_ward_response(
         "ward":
             ward_id,
 
-
-        # ---------------------------------------------------------------------
-        # EXISTING ENVIRONMENTAL DATA
-        # ---------------------------------------------------------------------
-
         "rainfallMm":
             rainfall,
 
         "riverLevelCm":
             river_level,
 
-        # ---------------------------------------------------------------------
-        # MULTI-HAZARD SENSOR VALUES
-        # ---------------------------------------------------------------------
-
         "windSpeedKmh":
-            wind_speed_kmh,
+            sensor_value(
+                latest_wind_sensor
+            ),
 
         "fireRiskIndex":
-            fire_risk_index,
+            sensor_value(
+                latest_fire_sensor
+            ),
 
         "smokeLevel":
-            smoke_level,
+            sensor_value(
+                latest_smoke_sensor
+            ),
 
         "seismicIntensity":
-            seismic_intensity,
+            sensor_value(
+                latest_seismic_sensor
+            ),
 
         "infrastructureStress":
-            infrastructure_stress,
-
-
-        # ---------------------------------------------------------------------
-        # EXISTING REPORT COUNTS
-        # ---------------------------------------------------------------------
+            sensor_value(
+                latest_infrastructure_sensor
+            ),
 
         "reportCount":
             verified_report_count,
 
         "verifiedReportCount":
-            report_breakdown[
-                "verified"
-            ],
+            verified_report_count,
 
         "pendingReportCount":
-            report_breakdown[
-                "pending"
-            ],
+            pending_report_count,
 
         "rejectedReportCount":
-            report_breakdown[
-                "rejected"
-            ],
+            rejected_report_count,
 
         "totalReportCount":
-            report_breakdown[
-                "total"
-            ],
-
-
-        # ---------------------------------------------------------------------
-        # LOCATION
-        # ---------------------------------------------------------------------
+            len(
+                ward_reports
+            ),
 
         "latitude":
             coordinates[
@@ -1991,18 +2010,8 @@ def build_ward_response(
                 "longitude"
             ],
 
-
-        # ---------------------------------------------------------------------
-        # DATA MODE
-        # ---------------------------------------------------------------------
-
         "dataMode":
             "HYBRID",
-
-
-        # ---------------------------------------------------------------------
-        # DATA SOURCES
-        # ---------------------------------------------------------------------
 
         "sources": {
 
@@ -2118,11 +2127,6 @@ def build_ward_response(
                 "REAL",
         },
 
-
-        # ---------------------------------------------------------------------
-        # TIMESTAMP
-        # ---------------------------------------------------------------------
-
         "timestamp":
             int(
                 time.time()
@@ -2132,7 +2136,7 @@ def build_ward_response(
 
 
     # =========================================================================
-    # MULTI-HAZARD FUSION
+    # EXISTING MULTI-HAZARD FUSION
     # =========================================================================
 
     fusion_result = (
@@ -2160,11 +2164,6 @@ def build_ward_response(
     # =========================================================================
     # BACKWARD-COMPATIBLE TOP-LEVEL FIELDS
     # =========================================================================
-    #
-    # Existing frontend code can continue using rainfallMm,
-    # riverLevelCm, reportCount, etc.
-    #
-    # New frontend code can use these additional fields.
 
     ward_response[
         "primaryHazard"
@@ -2172,13 +2171,11 @@ def build_ward_response(
         "primaryHazard"
     ]
 
-
     ward_response[
         "riskScore"
     ] = hazard_summary[
         "riskScore"
     ]
-
 
     ward_response[
         "riskLevel"
@@ -2186,13 +2183,11 @@ def build_ward_response(
         "riskLevel"
     ]
 
-
     ward_response[
         "confidenceScore"
     ] = hazard_summary[
         "confidenceScore"
     ]
-
 
     ward_response[
         "confidenceLevel"
@@ -2200,24 +2195,17 @@ def build_ward_response(
         "confidenceLevel"
     ]
 
-
     ward_response[
         "activeHazardCount"
     ] = hazard_summary[
         "activeHazardCount"
     ]
 
-
     ward_response[
         "activeHazards"
     ] = hazard_summary[
         "activeHazards"
     ]
-
-
-    # =========================================================================
-    # FULL MULTI-HAZARD INTELLIGENCE
-    # =========================================================================
 
     ward_response[
         "multiHazard"
@@ -2225,7 +2213,6 @@ def build_ward_response(
 
 
     return ward_response
-
 
 
 # =============================================================================
