@@ -2,7 +2,6 @@ import os
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import declarative_base, sessionmaker
-from sqlalchemy.pool import NullPool
 
 
 # ===========================================================================
@@ -33,7 +32,10 @@ if DATABASE_URL.startswith("postgres://"):
 
 if DATABASE_URL.startswith("sqlite"):
 
-    # Local development database
+    # -----------------------------------------------------------------------
+    # LOCAL DEVELOPMENT - SQLITE
+    # -----------------------------------------------------------------------
+
     engine = create_engine(
         DATABASE_URL,
         connect_args={
@@ -43,29 +45,43 @@ if DATABASE_URL.startswith("sqlite"):
 
 else:
 
-    # Production PostgreSQL / Neon
+    # -----------------------------------------------------------------------
+    # PRODUCTION - POSTGRESQL / NEON
+    # -----------------------------------------------------------------------
     #
-    # PRAVAAH uses Neon's pooled connection endpoint.
-    # Therefore we do not need another persistent
-    # SQLAlchemy QueuePool in front of Neon's pool.
+    # Neon already provides server-side connection pooling, but keeping a
+    # small SQLAlchemy pool here allows the Render backend process to reuse
+    # established PostgreSQL/TLS connections between API requests.
     #
-    # NullPool means:
-    # request opens connection
-    #       ↓
-    # query executes
-    #       ↓
-    # session closes
-    #       ↓
-    # connection is immediately released
+    # Previously NullPool created a brand-new connection for every request.
+    # That avoided pool exhaustion, but added roughly 2-3 seconds of latency
+    # in production.
     #
-    # This prevents SQLAlchemy QueuePool exhaustion.
+    # The expensive N+1 ward queries have now been removed, so a small local
+    # connection pool is appropriate again.
+    # -----------------------------------------------------------------------
 
     engine = create_engine(
         DATABASE_URL,
 
-        poolclass=NullPool,
-
+        # Check that a pooled connection is still alive before using it.
         pool_pre_ping=True,
+
+        # Keep a small number of reusable connections.
+        pool_size=5,
+
+        # Allow a few temporary extra connections during short traffic bursts.
+        max_overflow=5,
+
+        # Wait up to 30 seconds if every pooled connection is busy.
+        pool_timeout=30,
+
+        # Periodically recycle connections to avoid stale long-lived sessions.
+        pool_recycle=300,
+
+        # Prefer recently used connections. This helps keep fewer connections
+        # actively warm when traffic is light.
+        pool_use_lifo=True,
 
         connect_args={
             "connect_timeout": 10,
