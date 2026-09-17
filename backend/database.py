@@ -2,17 +2,12 @@ import os
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import declarative_base, sessionmaker
+from sqlalchemy.pool import NullPool
 
 
 # ===========================================================================
 # DATABASE CONFIGURATION
 # ===========================================================================
-
-# Production:
-# Render provides DATABASE_URL for PostgreSQL.
-#
-# Local development:
-# If DATABASE_URL is not configured, PRAVAAH falls back to SQLite.
 
 DATABASE_URL = os.getenv(
     "DATABASE_URL",
@@ -24,12 +19,7 @@ DATABASE_URL = os.getenv(
 # NORMALIZE POSTGRESQL URL
 # ===========================================================================
 
-# Some providers may still provide the older "postgres://" scheme.
-# SQLAlchemy expects "postgresql://".
-
-if DATABASE_URL.startswith(
-    "postgres://"
-):
+if DATABASE_URL.startswith("postgres://"):
     DATABASE_URL = DATABASE_URL.replace(
         "postgres://",
         "postgresql://",
@@ -41,63 +31,45 @@ if DATABASE_URL.startswith(
 # DATABASE ENGINE
 # ===========================================================================
 
-if DATABASE_URL.startswith(
-    "sqlite"
-):
+if DATABASE_URL.startswith("sqlite"):
 
-    # Local SQLite configuration.
+    # Local development database
     engine = create_engine(
         DATABASE_URL,
         connect_args={
-            "check_same_thread":
-                False,
+            "check_same_thread": False,
         },
     )
 
 else:
 
-    # PostgreSQL production configuration.
+    # Production PostgreSQL / Neon
     #
-    # Keep the pool deliberately controlled because
-    # cloud PostgreSQL plans often have limited
-    # available database connections.
+    # PRAVAAH uses Neon's pooled connection endpoint.
+    # Therefore we do not need another persistent
+    # SQLAlchemy QueuePool in front of Neon's pool.
     #
-    # pool_pre_ping:
-    # Checks whether a pooled connection is alive
-    # before SQLAlchemy gives it to a request.
+    # NullPool means:
+    # request opens connection
+    #       ↓
+    # query executes
+    #       ↓
+    # session closes
+    #       ↓
+    # connection is immediately released
     #
-    # pool_size:
-    # Number of persistent database connections.
-    #
-    # max_overflow:
-    # Extra temporary connections allowed during
-    # short traffic bursts.
-    #
-    # pool_timeout:
-    # Maximum number of seconds a request waits
-    # for an available connection.
-    #
-    # pool_recycle:
-    # Recreates older pooled connections periodically.
-    #
-    # pool_reset_on_return:
-    # Rolls back unfinished transaction state before
-    # returning a connection to the pool.
+    # This prevents SQLAlchemy QueuePool exhaustion.
 
     engine = create_engine(
         DATABASE_URL,
 
+        poolclass=NullPool,
+
         pool_pre_ping=True,
 
-        pool_size=5,
-
-        max_overflow=5,
-
-        pool_timeout=10,
-
-        pool_recycle=300,
-
-        pool_reset_on_return="rollback",
+        connect_args={
+            "connect_timeout": 10,
+        },
     )
 
 
@@ -108,6 +80,7 @@ else:
 SessionLocal = sessionmaker(
     autocommit=False,
     autoflush=False,
+    expire_on_commit=False,
     bind=engine,
 )
 
@@ -129,6 +102,10 @@ def get_db():
 
     try:
         yield db
+
+    except Exception:
+        db.rollback()
+        raise
 
     finally:
         db.close()
