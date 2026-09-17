@@ -551,11 +551,14 @@ def get_alert_candidates(
         time.time() * 1000
     )
 
-    for ward_id in WARD_COORDINATES:
-        ward_data = build_ward_response(
-            ward_id,
-            db,
-        )
+    all_ward_data = build_all_wards_response(
+        db
+    )
+
+    for ward_data in all_ward_data:
+        ward_id = ward_data[
+            "ward"
+        ]
 
         multi_hazard = ward_data.get(
             "multiHazard",
@@ -1505,12 +1508,17 @@ def fetch_real_rainfall():
 
     now = time.time()
 
+    # Do not retry Open-Meteo on every API request.
+    # Cache both successful and failed attempts for WEATHER_REFRESH_SECONDS.
     if (
-        WEATHER_AVAILABLE
-        and REAL_RAINFALL
+        LAST_WEATHER_UPDATE
         and now - LAST_WEATHER_UPDATE < WEATHER_REFRESH_SECONDS
     ):
         return
+
+    # Record the attempt immediately so a failed external request does not
+    # make every following API request wait on Open-Meteo again.
+    LAST_WEATHER_UPDATE = now
 
     try:
         ward_ids = list(WARD_COORDINATES.keys())
@@ -1543,7 +1551,8 @@ def fetch_real_rainfall():
             },
         )
 
-        with urlopen(request, timeout=12) as response:
+        # Weather must never block the whole API for 12 seconds.
+        with urlopen(request, timeout=3) as response:
             payload = json.loads(
                 response.read().decode("utf-8")
             )
@@ -1606,7 +1615,6 @@ def fetch_real_rainfall():
             REAL_RAINFALL = rainfall_result
             WEATHER_AVAILABLE = True
             WEATHER_ERROR = None
-            LAST_WEATHER_UPDATE = now
 
         else:
             raise RuntimeError(
@@ -2219,6 +2227,548 @@ def build_ward_response(
     return ward_response
 
 
+
+# =============================================================================
+# OPTIMIZED ALL-WARDS BUILDER
+# =============================================================================
+
+def build_all_wards_response(
+    db: Session,
+):
+    """
+    Build all ward responses efficiently.
+
+    Reports and sensor readings are loaded in bulk instead of issuing
+    separate PostgreSQL queries for every ward. The existing multi-hazard
+    risk algorithm and response structure are preserved.
+    """
+
+    # =========================================================================
+    # LOAD REPORTS ONCE
+    # =========================================================================
+
+    all_reports = (
+        db.query(IncidentReport)
+        .order_by(
+            IncidentReport.created_at.desc()
+        )
+        .all()
+    )
+
+    reports_by_ward = {
+        ward_id: []
+        for ward_id in WARD_COORDINATES
+    }
+
+    for report in all_reports:
+        if report.ward in reports_by_ward:
+            reports_by_ward[
+                report.ward
+            ].append(report)
+
+
+    # =========================================================================
+    # LOAD ONLINE SENSOR READINGS ONCE
+    # =========================================================================
+
+    required_sensor_types = {
+        "RIVER_LEVEL",
+        "WIND_SPEED",
+        "FIRE_RISK",
+        "SMOKE",
+        "SEISMIC_INTENSITY",
+        "INFRASTRUCTURE_STRESS",
+    }
+
+    all_sensors = (
+        db.query(SensorReading)
+        .filter(
+            SensorReading.status == "ONLINE",
+            SensorReading.sensor_type.in_(
+                required_sensor_types
+            ),
+        )
+        .order_by(
+            SensorReading.timestamp.desc()
+        )
+        .all()
+    )
+
+    # Because readings are newest-first, keep only the first reading for
+    # each (ward, sensor_type) combination.
+    latest_sensor_by_key = {}
+
+    for sensor in all_sensors:
+        key = (
+            sensor.ward,
+            sensor.sensor_type,
+        )
+
+        if key not in latest_sensor_by_key:
+            latest_sensor_by_key[
+                key
+            ] = sensor
+
+
+    def sensor_value(sensor):
+        if sensor is None:
+            return None
+
+        return float(
+            sensor.value
+        )
+
+
+    # =========================================================================
+    # BUILD ALL WARD RESPONSES
+    # =========================================================================
+
+    responses = []
+
+    for ward_id in WARD_COORDINATES:
+
+        coordinates = WARD_COORDINATES[
+            ward_id
+        ]
+
+        reading = WARD_STATE[
+            ward_id
+        ]
+
+
+        # ---------------------------------------------------------------------
+        # RAINFALL
+        # ---------------------------------------------------------------------
+
+        rainfall = get_rainfall(
+            ward_id
+        )
+
+        rainfall_source = (
+            "Open-Meteo weather model"
+            if WEATHER_AVAILABLE
+            else "Simulated weather fallback"
+        )
+
+        rainfall_mode = (
+            "REAL"
+            if WEATHER_AVAILABLE
+            else "SIMULATED"
+        )
+
+
+        # ---------------------------------------------------------------------
+        # LATEST SENSOR VALUES FROM MEMORY
+        # ---------------------------------------------------------------------
+
+        latest_river_sensor = (
+            latest_sensor_by_key.get(
+                (
+                    ward_id,
+                    "RIVER_LEVEL",
+                )
+            )
+        )
+
+        latest_wind_sensor = (
+            latest_sensor_by_key.get(
+                (
+                    ward_id,
+                    "WIND_SPEED",
+                )
+            )
+        )
+
+        latest_fire_sensor = (
+            latest_sensor_by_key.get(
+                (
+                    ward_id,
+                    "FIRE_RISK",
+                )
+            )
+        )
+
+        latest_smoke_sensor = (
+            latest_sensor_by_key.get(
+                (
+                    ward_id,
+                    "SMOKE",
+                )
+            )
+        )
+
+        latest_seismic_sensor = (
+            latest_sensor_by_key.get(
+                (
+                    ward_id,
+                    "SEISMIC_INTENSITY",
+                )
+            )
+        )
+
+        latest_infrastructure_sensor = (
+            latest_sensor_by_key.get(
+                (
+                    ward_id,
+                    "INFRASTRUCTURE_STRESS",
+                )
+            )
+        )
+
+
+        # ---------------------------------------------------------------------
+        # RIVER LEVEL
+        # ---------------------------------------------------------------------
+
+        if latest_river_sensor is not None:
+
+            river_level = float(
+                latest_river_sensor.value
+            )
+
+            river_level_source = (
+                latest_river_sensor.sensor_id
+            )
+
+            river_level_mode = "IOT"
+
+            river_level_timestamp = (
+                latest_river_sensor.timestamp
+            )
+
+        else:
+
+            river_level = (
+                reading[
+                    "riverLevelCm"
+                ]
+            )
+
+            river_level_source = (
+                "Simulated river sensor fallback"
+            )
+
+            river_level_mode = (
+                "SIMULATED"
+            )
+
+            river_level_timestamp = None
+
+
+        # ---------------------------------------------------------------------
+        # REPORT INFORMATION FROM MEMORY
+        # ---------------------------------------------------------------------
+
+        ward_reports = (
+            reports_by_ward.get(
+                ward_id,
+                [],
+            )
+        )
+
+        verified_reports_raw = [
+            report
+            for report in ward_reports
+            if report.status == "VERIFIED"
+        ]
+
+        verified_report_count = len(
+            verified_reports_raw
+        )
+
+        pending_report_count = sum(
+            1
+            for report in ward_reports
+            if report.status == "PENDING"
+        )
+
+        rejected_report_count = sum(
+            1
+            for report in ward_reports
+            if report.status == "REJECTED"
+        )
+
+        verified_reports = [
+            report_to_dict(report)
+            for report in verified_reports_raw
+        ]
+
+        reading[
+            "reportCount"
+        ] = verified_report_count
+
+
+        # ---------------------------------------------------------------------
+        # BASE WARD RESPONSE
+        # ---------------------------------------------------------------------
+
+        ward_response = {
+
+            "ward":
+                ward_id,
+
+            "rainfallMm":
+                rainfall,
+
+            "riverLevelCm":
+                river_level,
+
+            "windSpeedKmh":
+                sensor_value(
+                    latest_wind_sensor
+                ),
+
+            "fireRiskIndex":
+                sensor_value(
+                    latest_fire_sensor
+                ),
+
+            "smokeLevel":
+                sensor_value(
+                    latest_smoke_sensor
+                ),
+
+            "seismicIntensity":
+                sensor_value(
+                    latest_seismic_sensor
+                ),
+
+            "infrastructureStress":
+                sensor_value(
+                    latest_infrastructure_sensor
+                ),
+
+            "reportCount":
+                verified_report_count,
+
+            "verifiedReportCount":
+                verified_report_count,
+
+            "pendingReportCount":
+                pending_report_count,
+
+            "rejectedReportCount":
+                rejected_report_count,
+
+            "totalReportCount":
+                len(
+                    ward_reports
+                ),
+
+            "latitude":
+                coordinates[
+                    "latitude"
+                ],
+
+            "longitude":
+                coordinates[
+                    "longitude"
+                ],
+
+            "dataMode":
+                "HYBRID",
+
+            "sources": {
+
+                "rainfall":
+                    rainfall_source,
+
+                "rainfallMode":
+                    rainfall_mode,
+
+                "riverLevel":
+                    river_level_source,
+
+                "riverLevelMode":
+                    river_level_mode,
+
+                "riverLevelTimestamp":
+                    river_level_timestamp,
+
+                "windSpeed": (
+                    latest_wind_sensor.sensor_id
+                    if latest_wind_sensor
+                    else None
+                ),
+
+                "windSpeedMode": (
+                    latest_wind_sensor.source
+                    if latest_wind_sensor
+                    else None
+                ),
+
+                "windSpeedTimestamp": (
+                    latest_wind_sensor.timestamp
+                    if latest_wind_sensor
+                    else None
+                ),
+
+                "fireRisk": (
+                    latest_fire_sensor.sensor_id
+                    if latest_fire_sensor
+                    else None
+                ),
+
+                "fireRiskMode": (
+                    latest_fire_sensor.source
+                    if latest_fire_sensor
+                    else None
+                ),
+
+                "fireRiskTimestamp": (
+                    latest_fire_sensor.timestamp
+                    if latest_fire_sensor
+                    else None
+                ),
+
+                "smoke": (
+                    latest_smoke_sensor.sensor_id
+                    if latest_smoke_sensor
+                    else None
+                ),
+
+                "smokeMode": (
+                    latest_smoke_sensor.source
+                    if latest_smoke_sensor
+                    else None
+                ),
+
+                "smokeTimestamp": (
+                    latest_smoke_sensor.timestamp
+                    if latest_smoke_sensor
+                    else None
+                ),
+
+                "seismic": (
+                    latest_seismic_sensor.sensor_id
+                    if latest_seismic_sensor
+                    else None
+                ),
+
+                "seismicMode": (
+                    latest_seismic_sensor.source
+                    if latest_seismic_sensor
+                    else None
+                ),
+
+                "seismicTimestamp": (
+                    latest_seismic_sensor.timestamp
+                    if latest_seismic_sensor
+                    else None
+                ),
+
+                "infrastructure": (
+                    latest_infrastructure_sensor.sensor_id
+                    if latest_infrastructure_sensor
+                    else None
+                ),
+
+                "infrastructureMode": (
+                    latest_infrastructure_sensor.source
+                    if latest_infrastructure_sensor
+                    else None
+                ),
+
+                "infrastructureTimestamp": (
+                    latest_infrastructure_sensor.timestamp
+                    if latest_infrastructure_sensor
+                    else None
+                ),
+
+                "crowdReports":
+                    "Human-verified citizen reports",
+
+                "crowdReportsMode":
+                    "REAL",
+            },
+
+            "timestamp":
+                int(
+                    time.time()
+                    * 1000
+                ),
+        }
+
+
+        # ---------------------------------------------------------------------
+        # EXISTING MULTI-HAZARD RISK ENGINE
+        # ---------------------------------------------------------------------
+
+        fusion_result = (
+            assess_ward_hazards(
+                ward_data=
+                    ward_response,
+
+                verified_reports=
+                    verified_reports,
+            )
+        )
+
+        hazard_summary = (
+            build_hazard_summary(
+                fusion_result
+            )
+        )
+
+
+        # ---------------------------------------------------------------------
+        # SAME BACKWARD-COMPATIBLE TOP-LEVEL FIELDS
+        # ---------------------------------------------------------------------
+
+        ward_response[
+            "primaryHazard"
+        ] = hazard_summary[
+            "primaryHazard"
+        ]
+
+        ward_response[
+            "riskScore"
+        ] = hazard_summary[
+            "riskScore"
+        ]
+
+        ward_response[
+            "riskLevel"
+        ] = hazard_summary[
+            "riskLevel"
+        ]
+
+        ward_response[
+            "confidenceScore"
+        ] = hazard_summary[
+            "confidenceScore"
+        ]
+
+        ward_response[
+            "confidenceLevel"
+        ] = hazard_summary[
+            "confidenceLevel"
+        ]
+
+        ward_response[
+            "activeHazardCount"
+        ] = hazard_summary[
+            "activeHazardCount"
+        ]
+
+        ward_response[
+            "activeHazards"
+        ] = hazard_summary[
+            "activeHazards"
+        ]
+
+        ward_response[
+            "multiHazard"
+        ] = fusion_result
+
+        responses.append(
+            ward_response
+        )
+
+
+    return responses
+
+
 # =============================================================================
 # EMERGENCY ASSISTANT RISK ENGINE
 # =============================================================================
@@ -2820,13 +3370,9 @@ def get_all_wards(
     update_simulation()
     fetch_real_rainfall()
 
-    return [
-        build_ward_response(
-            ward_id,
-            db,
-        )
-        for ward_id in WARD_COORDINATES
-    ]
+    return build_all_wards_response(
+        db
+    )
 
 
 # =============================================================================
